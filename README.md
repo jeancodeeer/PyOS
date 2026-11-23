@@ -9,7 +9,7 @@
 **A desktop, a web browser, 34 apps, OpenGL, and PyWin: Windows `.exe` files running natively — DOOM included.**<br>
 It boots on a bare x86_64 machine. Under it there is no Linux and no Windows: only [PyKernel](PYKERNEL.md), a few hundred lines of Rust that start MicroPython. Everything you see is Python you can read and change.
 
-[![DOWNLOAD](https://img.shields.io/badge/DOWNLOAD-ISO_%C2%B7_9_MB-000000?style=for-the-badge&labelColor=ffffff)](https://github.com/jeancodeeer/PyOS/releases/latest)
+[![DOWNLOAD](https://img.shields.io/badge/DOWNLOAD-ISO_%C2%B7_16_MB-000000?style=for-the-badge&labelColor=ffffff)](https://github.com/jeancodeeer/PyOS/releases/latest)
 [![WATCH](https://img.shields.io/badge/WATCH-THE_9_MIN_TOUR-ffffff?style=for-the-badge&labelColor=000000)](docs/video/pyos-demo.mp4)
 [![KERNEL](https://img.shields.io/badge/KERNEL-PYKERNEL-ffffff?style=for-the-badge&labelColor=000000)](PYKERNEL.md)
 [![LICENSE](https://img.shields.io/badge/LICENSE-MIT-ffffff?style=for-the-badge&labelColor=000000)](LICENSE)
