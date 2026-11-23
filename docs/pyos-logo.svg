@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 106" width="256" height="272">
+<title>PyOS</title>
+<rect x="16" y="16" width="32" height="32" rx="6" fill="#3776ab"/>
+<rect x="52" y="16" width="32" height="32" rx="6" fill="#ffd43b"/>
+<rect x="16" y="52" width="32" height="32" rx="6" fill="#ffd43b"/>
+<rect x="52" y="52" width="32" height="32" rx="6" fill="#3776ab"/>
+<path d="M4 50 L84 50 L89.5 44.5 L89.5 16.5 L84 11 L56 11 L50 17 L50 88" fill="none" stroke="#1c2c4a" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M4 50 L84 50 L89.5 44.5 L89.5 16.5 L84 11 L56 11 L50 17 L50 88" fill="none" stroke="#5a8cd2" stroke-width="2.6" stroke-dasharray="3 4" stroke-linecap="round" stroke-linejoin="round" stroke-dashoffset="-14"/>
+<ellipse cx="50" cy="89.5" rx="7" ry="6.5" fill="#1c2c4a"/>
+<circle cx="47" cy="89" r="2" fill="#fff"/><circle cx="47" cy="89.6" r="1" fill="#0a0a0a"/>
+<circle cx="53" cy="89" r="2" fill="#fff"/><circle cx="53" cy="89.6" r="1" fill="#0a0a0a"/>
+<path d="M50 95 v4 l-2 2 M50 99 l2 2" stroke="#e63c3c" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+</svg>

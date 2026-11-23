@@ -1,0 +1,31 @@
+#include <windows.h>
+#define ID_NUEVO 101
+#define ID_ABRIR 102
+#define ID_GUARDAR 103
+#define ID_SALIR 104
+#define ID_AJUSTE 201
+#define ID_ACERCA 301
+MENU_PRINCIPAL MENU
+BEGIN
+    POPUP "&Archivo"
+    BEGIN
+        MENUITEM "&Nuevo", ID_NUEVO
+        MENUITEM "&Abrir...", ID_ABRIR
+        MENUITEM "&Guardar como...", ID_GUARDAR
+        MENUITEM SEPARATOR
+        MENUITEM "&Salir", ID_SALIR
+    END
+    POPUP "&Ver"
+    BEGIN
+        MENUITEM "&Letra grande", ID_AJUSTE, CHECKED
+    END
+    POPUP "A&yuda"
+    BEGIN
+        MENUITEM "&Acerca de...", ID_ACERCA
+    END
+END
+STRINGTABLE
+BEGIN
+    1 "Notas Win32"
+    2 "Un bloc de notas escrito en C para Windows, corriendo en PyWin."
+END

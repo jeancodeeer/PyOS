@@ -1,0 +1,24 @@
+<html><head><title>Como funciona el navegador</title>
+<style>body{margin:24px;max-width:760px} code{background:#eef} h2{color:#234}</style></head>
+<body>
+<h1>El navegador de PyKernel</h1>
+<p>Todo esta escrito en Python y corre dentro de PyKernel, sin sistema operativo debajo.</p>
+<h2>Las piezas</h2>
+<table border="1">
+<tr><th>Archivo</th><th>Que hace</th></tr>
+<tr><td><code>/lib/kernel/net.py</code></td><td>Ethernet, IP, TCP, DNS: la red</td></tr>
+<tr><td><code>/lib/ssl.py</code></td><td>TLS 1.3 para HTTPS (X25519, ChaCha20-Poly1305, certificados)</td></tr>
+<tr><td><code>/lib/http/client.py</code></td><td>HTTP/1.1, gzip, redirecciones</td></tr>
+<tr><td><code>/lib/browser/html.py</code></td><td>Convierte el HTML en un arbol</td></tr>
+<tr><td><code>/lib/browser/css.py</code></td><td>Hojas de estilo, selectores, cascada</td></tr>
+<tr><td><code>/lib/browser/layout.py</code></td><td>Coloca cada cosa: lineas, listas, tablas</td></tr>
+<tr><td><code>/lib/imaging/</code></td><td>JPEG y GIF (PNG y BMP en pygame)</td></tr>
+<tr><td><code>/lib/desktop/apps/browser.py</code></td><td>La ventana: pestanas, barra, marcadores</td></tr>
+</table>
+<h2>Lo que no hace</h2>
+<ul><li>No ejecuta JavaScript: las paginas que lo necesitan para mostrarse se ven incompletas.</li>
+<li>Una sola fuente (la de la tarjeta de video, 8x16), ampliada para los titulos grandes.</li>
+<li>CSS parcial: sin floats reales, posicionamiento ni grid; flex en filas aproximado.</li>
+<li>JPEG progresivo, WebP y SVG no se muestran.</li></ul>
+<p><a href="about:home">Volver al inicio</a></p>
+</body></html>

@@ -1,0 +1,66 @@
+# Builds PyOS from source and publishes the bootable ISO.
+#
+#   git tag v1.0 && git push origin v1.0     -> a release named after the tag
+#   Actions -> Release -> Run workflow       -> the same, by hand
+#
+# Release notes come from docs/releases/<tag>.md when that file exists.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  iso:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true                       # MicroPython 1.25 (vendor/micropython)
+
+      - name: Tools (GRUB and xorriso for the ISO, QEMU to try it)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends grub-pc-bin grub-common xorriso mtools qemu-system-x86
+
+      - name: Rust for a bare-metal x86_64 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-none
+          components: llvm-tools
+
+      - name: Build PyKernel + PyOS
+        run: python3 tools/build.py
+
+      - name: Make the ISO
+        run: |
+          python3 tools/iso.py
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          cp build/pyos.iso "pyos-${TAG#v}.iso"
+          sha256sum "pyos-${TAG#v}.iso" > "pyos-${TAG#v}.iso.sha256"
+
+      - name: Boot it once in QEMU (it must reach the PyOS prompt)
+        run: |
+          timeout 120 qemu-system-x86_64 -m 512 -cdrom "pyos-${TAG#v}.iso" -boot d -display none \
+            -serial stdio -no-reboot > boot.log 2>&1 || true
+          grep -a "PyOS 1" boot.log
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: PyOS ${{ env.TAG }}
+          body_path: docs/releases/${{ env.TAG }}.md
+          files: |
+            pyos-*.iso
+            pyos-*.iso.sha256
+            docs/video/pyos-demo.mp4

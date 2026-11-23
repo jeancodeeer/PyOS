@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-label="PYOS: AN OPERATING SYSTEM WRITTEN IN PYTHON. DESKTOP, 34 PYGAME APPS, OPENGL, AND PYWIN TO RUN WINDOWS PROGRAMS">
+<rect width="1280" height="640" fill="#000"/>
+<rect x="24" y="24" width="1232" height="592" fill="none" stroke="#fff" stroke-width="2"/>
+<g font-family="'IBM Plex Mono','DejaVu Sans Mono',Menlo,Consolas,monospace" fill="#fff">
+  <text x="64" y="84" font-size="20" letter-spacing="4">N° 003 — PYOS</text>
+  <text x="1216" y="84" font-size="20" letter-spacing="4" text-anchor="end">REF. 1.0</text>
+  <line x1="64" y1="108" x2="1216" y2="108" stroke="#fff" stroke-width="1"/>
+  <text x="64" y="300" font-size="150" font-weight="700" letter-spacing="-4">PyOS</text>
+  <text x="68" y="370" font-size="30" letter-spacing="1">An operating system written in Python.</text>
+  <text x="68" y="420" font-size="22" fill="#bbb">Desktop · browser · 34 pygame apps · OpenGL · PyWin runs Windows .exe — even DOOM</text>
+  <line x1="64" y1="532" x2="1216" y2="532" stroke="#fff" stroke-width="1"/>
+  <text x="64" y="572" font-size="18" letter-spacing="3">x86_64 · PYKERNEL + MICROPYTHON · NO LINUX · NO WINDOWS UNDERNEATH</text>
+</g>
+<g transform="translate(960 118) scale(2.6)">
+  <rect x="16" y="16" width="32" height="32" rx="6" fill="#3776ab"/>
+  <rect x="52" y="16" width="32" height="32" rx="6" fill="#ffd43b"/>
+  <rect x="16" y="52" width="32" height="32" rx="6" fill="#ffd43b"/>
+  <rect x="52" y="52" width="32" height="32" rx="6" fill="#3776ab"/>
+  <path d="M4 50 L84 50 L89.5 44.5 L89.5 16.5 L84 11 L56 11 L50 17 L50 88" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M4 50 L84 50 L89.5 44.5 L89.5 16.5 L84 11 L56 11 L50 17 L50 88" fill="none" stroke="#1c2c4a" stroke-width="2.6" stroke-dasharray="3 4" stroke-linecap="round" stroke-linejoin="round" stroke-dashoffset="-14"/>
+  <ellipse cx="50" cy="89.5" rx="7" ry="6.5" fill="#fff"/>
+  <circle cx="47" cy="89" r="2" fill="#000"/><circle cx="53" cy="89" r="2" fill="#000"/>
+  <path d="M50 95 v4 l-2 2 M50 99 l2 2" stroke="#e63c3c" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+</g>
+</svg>

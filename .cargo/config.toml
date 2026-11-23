@@ -1,0 +1,12 @@
+[build]
+target = "x86_64-unknown-none"
+
+[target.x86_64-unknown-none]
+rustflags = [
+    "-C", "relocation-model=static",
+    "-C", "link-arg=-Trust/linker.ld",
+    "-C", "link-arg=-zmax-page-size=0x1000",
+    "-C", "link-arg=--gc-sections",
+    # exception reports go through mpy/mphal.c, which can hand them to Python
+    "-C", "link-arg=--wrap=mp_obj_print_exception",
+]
