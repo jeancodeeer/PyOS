@@ -8,7 +8,7 @@
 #   settings.apply_all()              at start-up
 from pyos import config
 
-RESOLUTIONS = ("800x600", "1024x768", "1280x720", "1280x800", "1366x768", "1440x900", "1600x900", "1920x1080")
+RESOLUTIONS = ("800x600", "1024x768", "1280x720", "1280x800", "1360x768", "1440x900", "1600x900", "1920x1080")
 ZONES = [("UTC-8 Los Angeles", -480), ("UTC-6 Mexico", -360), ("UTC-5 Lima, Bogota", -300),
          ("UTC-4 Caracas, Santiago", -240), ("UTC-3 Buenos Aires", -180), ("UTC 0 Londres", 0),
          ("UTC+1 Madrid", 60), ("UTC+2 Madrid (verano)", 120), ("UTC+3 Moscu", 180), ("UTC+8 Pekin", 480),
@@ -87,11 +87,30 @@ def _resolution(value):
         return
     if (width, height) == tuple(theme.SCREEN):
         return
+    if not resolution_ok(width, height):
+        # the screen cannot do it: keep what works, and do not keep the setting
+        good = "%dx%d" % tuple(theme.SCREEN) if theme.SCREEN and resolution_ok(*theme.SCREEN) \
+            else DEFAULTS["resolucion"]
+        config.set("resolucion", good)
+        raise ValueError("la pantalla no puede mostrar %dx%d" % (width, height))
     w = _wm()
     if w is not None:
         w.set_resolution(width, height)
     else:
         theme.SCREEN = (width, height)
+
+
+def resolution_ok(width, height):
+    try:
+        from kernel import video
+        return bool(video.supported(width, height))
+    except Exception:
+        return True
+
+
+def resolutions():
+    """The resolutions this screen can show."""
+    return [r for r in RESOLUTIONS if resolution_ok(*(int(v) for v in r.split("x")))]
 
 
 def _text_scale(value):

@@ -19,7 +19,7 @@ def run(boot=False):
         settings.apply_all(screen=False)
     except Exception:
         pass
-    screen = pygame.display.set_mode(theme.SCREEN)
+    screen = theme.open_screen()
     steps = [("Cargando las fuentes", _fonts), ("Preparando el fondo de pantalla", _wallpaper),
              ("Cargando las aplicaciones", _apps), ("Iniciando el sonido", _chime)]
     if boot:
