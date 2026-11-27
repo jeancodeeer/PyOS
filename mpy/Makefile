@@ -53,7 +53,6 @@ SRC_C = \
 	arena.c \
 	modaes.c \
 	modjs.c \
-	modfast.c \
 	$(JS_C) \
 	$(MEDIA_C) \
 	mpthread.c \
@@ -69,7 +68,7 @@ SRC_C = \
 	$(SRC_LIB_LIBM_DBL_C) \
 	$(SRC_LIB_LIBM_DBL_SQRT_SW_C) \
 
-SRC_QSTR += mphal.c modkernel.c modgfx.c modmedia.c modaes.c modjs.c modfast.c mpthread.c \
+SRC_QSTR += mphal.c modkernel.c modgfx.c modmedia.c modaes.c modjs.c mpthread.c \
 	readline.c \
 	shared/runtime/pyexec.c \
 	shared/runtime/sys_stdio_mphal.c \
