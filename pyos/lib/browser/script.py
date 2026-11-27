@@ -1,5 +1,5 @@
-# JavaScript for the browser: the page's scripts run in QuickJS (the
-# kernel's _js module) against a DOM written in JavaScript (dom.js).
+# JavaScript for the browser: the page's scripts run in the JavaScript
+# engine written in Python (pyos/lib/js) against a DOM written in JavaScript (dom.js).
 #
 #   js = Scripts(page)
 #   js.start()          the page's tree goes to JS, its scripts run, DOMContentLoaded, load
@@ -27,7 +27,7 @@ _dom_source = None
 
 def available():
     try:
-        import _js  # noqa: F401
+        import js  # noqa: F401
         return True
     except ImportError:
         return False
@@ -58,10 +58,8 @@ class Scripts:
 
     # ---- start ----
     def start(self):
-        import _js
-        import media
+        import js as _js
         import time
-        media.init()                                    # the engine's memory is the media arena
         try:
             from kernel import timer
             per_ms = timer.tsc_per_ms or timer.calibrate()

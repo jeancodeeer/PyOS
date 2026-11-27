@@ -5,6 +5,11 @@
 # or float, strings are str, everything else is a JSObject (or a Symbol).
 import math
 
+try:
+    RecursionError
+except NameError:                   # MicroPython
+    RecursionError = RuntimeError
+
 INF = float("inf")
 NAN = float("nan")
 MAX_SAFE = 9007199254740991
@@ -64,7 +69,7 @@ class JSThrow(Exception):
     """A JavaScript exception: .value is what was thrown."""
 
     def __init__(self, value):
-        Exception.__init__(self)
+        super().__init__()
         self.value = value
 
     def __str__(self):
@@ -90,13 +95,13 @@ class Control(BaseException):
 
 class BreakTo(Control):
     def __init__(self, label):
-        BaseException.__init__(self)
+        super().__init__()
         self.label = label
 
 
 class ContinueTo(Control):
     def __init__(self, label):
-        BaseException.__init__(self)
+        super().__init__()
         self.label = label
 
 
@@ -104,7 +109,7 @@ class GenReturn(Control):
     """generator.return(v): finishes the generator, running its finally blocks."""
 
     def __init__(self, value):
-        BaseException.__init__(self)
+        super().__init__()
         self.value = value
 
 
@@ -112,7 +117,7 @@ class Interrupted(Control):
     """The script ran too long (or used too much memory): not catchable by JavaScript."""
 
     def __init__(self, why):
-        BaseException.__init__(self)
+        super().__init__()
         self.why = why
 
 
@@ -422,9 +427,7 @@ class JSFunction(JSObject):
 # The standard prototypes: made here, filled in by builtins.py
 OBJECT_PROTO = JSObject(None)
 FUNCTION_PROTO = JSObject(OBJECT_PROTO, "Function")
-ARRAY_PROTO = JSArray.__new__(JSArray)
-JSObject.__init__(ARRAY_PROTO, OBJECT_PROTO, "Array")
-ARRAY_PROTO.a = []
+ARRAY_PROTO = JSArray([], OBJECT_PROTO)
 STRING_PROTO = JSObject(OBJECT_PROTO, "String")
 NUMBER_PROTO = JSObject(OBJECT_PROTO, "Number")
 BOOLEAN_PROTO = JSObject(OBJECT_PROTO, "Boolean")
@@ -552,7 +555,7 @@ def num_str(v, radix=10):
         return "0"
     if radix != 10:
         return float_radix(v, radix)
-    if v == int(v) and abs(v) < 1e21:
+    if v == int(v) and abs(v) < 9007199254740992.0:
         return str(int(v))
     # the shortest digits that read back as the same number
     s = None

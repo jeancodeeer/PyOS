@@ -254,7 +254,14 @@ class Parser:
             if v == "switch":
                 return self.switch_statement()
             if v == "with":
-                self.error("with statements are not supported")
+                if self.strict:
+                    self.error("Strict mode code may not include a with statement")
+                self.next()
+                self.expect("(")
+                obj = self.expression()
+                self.expect(")")
+                body = self.statement()
+                return Node("With", pos, obj=obj, body=body)
             if v == "debugger":
                 self.next()
                 self.semicolon()
@@ -1080,5 +1087,33 @@ class Parser:
         self.error("invalid destructuring target", e.pos)
 
 
+def ascii_source(src):
+    """The source with only ASCII characters (MicroPython indexes a non-ASCII string in O(n)):
+    other characters become \\u escapes, which mean the same in strings, regexes and names."""
+    if len(src.encode()) == len(src):
+        return src
+    out = []
+    run = []
+    for ch in src:
+        if ch < "\x80":
+            run.append(ch)
+            continue
+        if run:
+            out.append("".join(run))
+            run = []
+        if ch in "\xa0\ufeff\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u202f\u205f\u3000":
+            out.append(" ")
+        else:
+            cp = ord(ch)
+            if cp < 0x10000:
+                out.append("\\u%04x" % cp)
+            else:
+                cp -= 0x10000
+                out.append("\\u%04x\\u%04x" % (0xD800 + (cp >> 10), 0xDC00 + (cp & 0x3FF)))
+    if run:
+        out.append("".join(run))
+    return "".join(out)
+
+
 def parse(src):
-    return Parser(src).parse_program()
+    return Parser(ascii_source(src)).parse_program()

@@ -23,7 +23,7 @@ SPACES = " \t\x0b\x0c\xa0﻿              　"
 
 class JSSyntaxError(Exception):
     def __init__(self, msg, pos=0, src=None):
-        Exception.__init__(self, msg)
+        super().__init__(msg)
         self.msg = msg
         self.pos = pos
         self.src = src
@@ -48,14 +48,38 @@ def _id_part(c):
 _HEX = "0123456789abcdefABCDEF"
 
 
+class _View:
+    """An ASCII string over bytes: [i], slices, startswith and find in O(1) from any position
+    (MicroPython's str finds a character position by walking the UTF-8 from the start)."""
+    __slots__ = ("b",)
+
+    def __init__(self, src):
+        self.b = src.encode()
+
+    def __getitem__(self, k):
+        if type(k) is int:
+            return chr(self.b[k])
+        return self.b[k].decode()
+
+    def __len__(self):
+        return len(self.b)
+
+    def startswith(self, p, i=0):
+        return self.b.startswith(p.encode(), i)
+
+    def find(self, sub, i=0):
+        return self.b.find(sub.encode(), i)
+
+
 class Lexer:
     def __init__(self, src):
-        self.s = src
+        self.src = src
         self.n = len(src)
+        self.s = _View(src) if len(src.encode()) == self.n else src
         self.i = 0
 
     def error(self, msg, pos=None):
-        raise JSSyntaxError(msg, self.i if pos is None else pos, self.s)
+        raise JSSyntaxError(msg, self.i if pos is None else pos, self.src)
 
     # ---- white space and comments; True if a line ended ----
     def skip(self):
