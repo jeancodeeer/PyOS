@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/snakeyos-logo.png" alt="SnakeyOS" width="128">
+
 <img src="assets/pyos-preview.svg" alt="SnakeyOS — an operating system written in Python: desktop, browser, 34 pygame apps, OpenGL, and PyWin to run Windows programs, even DOOM" width="100%">
 
 <br>
@@ -9,7 +11,7 @@
 **A desktop, a web browser, 34 apps, OpenGL, and PyWin: Windows `.exe` files running natively — DOOM included.**<br>
 It boots on a bare x86_64 machine. Under it there is no Linux and no Windows: only [PyKernel](PYKERNEL.md), a few hundred lines of Rust that start MicroPython. Everything you see is Python you can read and change.
 
-[![DOWNLOAD](https://img.shields.io/badge/DOWNLOAD-ISO_%C2%B7_16_MB-000000?style=for-the-badge&labelColor=ffffff)](https://github.com/jeancodeeer/SnakeyOS/releases/latest)
+[![DOWNLOAD](https://img.shields.io/badge/DOWNLOAD-x86_%C2%B7_ARM64_ISO-000000?style=for-the-badge&labelColor=ffffff)](https://github.com/jeancodeeer/SnakeyOS/releases/latest)
 [![WATCH](https://img.shields.io/badge/WATCH-THE_9_MIN_TOUR-ffffff?style=for-the-badge&labelColor=000000)](docs/video/pyos-demo.mp4)
 [![KERNEL](https://img.shields.io/badge/KERNEL-PYKERNEL-ffffff?style=for-the-badge&labelColor=000000)](PYKERNEL.md)
 [![LICENSE](https://img.shields.io/badge/LICENSE-MIT-ffffff?style=for-the-badge&labelColor=000000)](LICENSE)
@@ -67,6 +69,7 @@ Operating systems written in high-level languages exist (Singularity in C#, Redo
 - **Speed.** It is Python (MicroPython) all the way. Pixel loops use viper (MicroPython's native code), but QEMU without KVM runs the 3D demo at a few frames per second.
 - **Hardware.** Tested in QEMU. Drivers exist for real devices (AHCI, NVMe, xHCI USB, e1000, RTL8139, virtio, AC'97), but SnakeyOS has not been tried on many real PCs.
 - **PyWin** runs 64-bit programs only. Threads are real but take turns. There is no DirectX, no Windows networking (`ws2_32`) and no dialog boxes from resources. A program that computes without calling Windows holds the desktop until it does.
+- **No C of its own**: the kernel is Rust, everything above it is Python — the WebP, MP3, AAC and H.264 decoders too. Only MicroPython's VM and QuickJS (until the JavaScript engine in Python is done) are C.
 - **Python** is MicroPython 1.25, not CPython: C extensions (numpy…) do not load.
 - **The browser** draws HTML and CSS but does not run JavaScript.
 
@@ -146,7 +149,7 @@ tools/run_arm64.sh             # boot it in QEMU (qemu-system-arm, qemu-efi-aarc
 python tools/test.py           # kernel checks (89)
 python tools/test_desktop.py   # desktop and apps (16)
 python tools/test_pywin.py     # PyWin and OpenGL (13)
-python tools/test_fast.py      # the C code ARM64 uses instead of viper == viper
+python tools/test_fast.py      # the Rust code ARM64 uses instead of viper == viper
 ```
 
 After editing only Python, `python tools/build.py --fs` repacks the files in a second. The [release workflow](.github/workflows/release.yml) builds the ISO the same way.
