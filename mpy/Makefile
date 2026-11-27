@@ -35,15 +35,7 @@ CFLAGS += $(INC) -std=gnu99 -Wall -O2 -DNDEBUG \
 	-U_FORTIFY_SOURCE -fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-fno-common -ffunction-sections -fdata-sections
 
-# JavaScript: QuickJS (see js/quickjs and THIRD_PARTY.md) and the C library bits it needs
-JS_C = js/quickjs/quickjs.c js/quickjs/libregexp.c js/quickjs/libunicode.c js/quickjs/cutils.c \
-	js/quickjs/dtoa.c js/shim.c
-
 SRC_C = \
-	modmedia.c \
-	arena.c \
-	modjs.c \
-	$(JS_C) \
 	shared/libc/printf.c \
 	shared/libc/string0.c \
 	shared/runtime/pyexec.c \
@@ -55,14 +47,13 @@ SRC_C = \
 	$(SRC_LIB_LIBM_DBL_C) \
 	$(SRC_LIB_LIBM_DBL_SQRT_SW_C) \
 
-SRC_QSTR += modmedia.c modjs.c \
+SRC_QSTR += \
 	shared/runtime/pyexec.c \
 	shared/runtime/sys_stdio_mphal.c \
 
 OBJ = $(PY_O) $(addprefix $(BUILD)/, $(SRC_C:.c=.o))
 
 # the third-party decoders: their own warnings are theirs; Arduino.h/pgmspace.h shims for Helix
-$(addprefix $(BUILD)/, $(JS_C:.c=.o)): CFLAGS += -w -O2 -DPYKERNEL -DCONFIG_VERSION=\"2026-06-04\" -D_GNU_SOURCE
 
 all: $(BUILD)/libmicropython.a
 

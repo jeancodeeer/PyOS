@@ -5,7 +5,7 @@
 # [parent_frame, slot1, slot2...]; the others are plain Python locals. The
 # top of a script is global: var and function there are properties of the
 # global object, let/const/class are in the global lexical table (R.lex).
-from js.parser import Node, parse
+from js.parser import Node, parse, ascii_source
 from js import rt
 
 _ids = [0]
@@ -155,7 +155,7 @@ class Analyzer:
                     stack.append(s.left)
             elif t in ("While", "DoWhile"):
                 stack.append(s.body)
-            elif t == "Labeled":
+            elif t == "Labeled" or t == "With":
                 stack.append(s.body)
             elif t == "Try":
                 stack.append(s.final)
@@ -195,12 +195,20 @@ class Analyzer:
     def resolve(self, name):
         s = self.scope
         fn = self.fn
+        self.withs = None
         while s is not None:
             b = s.names.get(name)
             if b is not None:
                 if b.scope.fn is not fn and not b.glob:
                     b.captured = True
                 return b
+            if s.kind == "with":
+                w = s.names["%with"]
+                if w.scope.fn is not fn:
+                    w.captured = True
+                if self.withs is None:
+                    self.withs = []
+                self.withs.append(w)
             s = s.parent
         return None
 
@@ -319,6 +327,12 @@ class Analyzer:
             self.sub(s.body)
         elif t == "Labeled":
             self.stmt(s.body)
+        elif t == "With":
+            self.expr(s.obj)
+            sc = self.push("with", s)
+            self.declare(sc, "%with", "let")
+            self.sub(s.body)
+            self.pop()
         elif t == "Try":
             self.block_body(s.block.body, s.block)
             if s.handler is not None:
@@ -420,6 +434,8 @@ class Analyzer:
                         f.scope.names["arguments"] = f.args
                     b = self.resolve(name)
             e.b = b
+            if self.withs:
+                e.withs = self.withs
         elif t in ("Num", "Str", "Regex", "Null", "Bool", "Super"):
             if t == "Super":
                 self.this_fn().uses_this = True
@@ -632,7 +648,12 @@ class FnGen:
         body_start = len(self.lines)
         if node is None:
             self.prologue_script()
-            for st in self.unit.tree.body:
+            body = self.unit.tree.body
+            for k in range(len(body)):
+                st = body[k]
+                if k == len(body) - 1 and self.unit.want_value and st.t == "Expr":
+                    self.emit("return %s" % self.expr(st.e))
+                    break
                 self.stmt(st)
             self.emit("return UNDEF")
             head = "def %s(F, this):" % pyname
@@ -1074,6 +1095,22 @@ class FnGen:
             self.loop(s, ["for %s in %s:" % (v, it)], body, labels)
         self.scope = saved_scope
 
+    def s_With(self, s):
+        v = self.expr(s.obj)
+        saved = self.enter_scope(s.scope)
+        b = s.scope.names["%with"]
+        self.write_stmt(b, "%with", "to_obj(%s)" % v)
+        self.sub(s.body)
+        self.scope = saved
+
+    def with_read(self, e, plain):
+        """A name inside with blocks: the with objects first (innermost last in the list order given)."""
+        out = plain
+        for w in reversed(e.withs):
+            W = self.read(w, "%with")
+            out = "(get(%s, %r) if has_prop(%r, %s) else %s)" % (W, e.name, e.name, W, out)
+        return out
+
     def s_Break(self, s):
         self.jump(s, True)
 
@@ -1240,6 +1277,9 @@ class FnGen:
         if op == "=":
             if target.t == "Ident":
                 b = self.lookup(target.name)
+                if getattr(target, "withs", None):
+                    self.emit(self.e_Assign(e))
+                    return
                 self.write_stmt(b, target.name, self.expr(e.value, target.name))
             else:
                 self.emit(self.member_put(target, self.expr(e.value)))
@@ -1306,7 +1346,10 @@ class FnGen:
         return "None"
 
     def e_Ident(self, e):
-        return self.read(getattr(e, "b", None), e.name)
+        plain = self.read(getattr(e, "b", None), e.name)
+        if getattr(e, "withs", None):
+            return self.with_read(e, plain)
+        return plain
 
     def e_This(self, e):
         if self.fn.node is not None and self.fn.arrow:
@@ -1350,14 +1393,34 @@ class FnGen:
 
     def e_Array(self, e):
         items = []
+        has_spread = False
         for x in e.elems:
             if x is None:
                 items.append("HOLE")
             elif x.t == "Spread":
                 items.append("*spread(%s)" % self.expr(x.arg))
+                has_spread = True
             else:
                 items.append(self.expr(x))
+        if has_spread:
+            return "arr(%s)" % self.joined(items)
         return "arr([%s])" % ", ".join(items)
+
+    def joined(self, items):
+        """[a, *b, c] for MicroPython (no unpacking in displays): xs([a], b, [c])."""
+        parts = []
+        run = []
+        for it in items:
+            if it.startswith("*"):
+                if run:
+                    parts.append("[%s]" % ", ".join(run))
+                    run = []
+                parts.append(it[1:])
+            else:
+                run.append(it)
+        if run:
+            parts.append("[%s]" % ", ".join(run))
+        return "xs(%s)" % ", ".join(parts)
 
     def e_Object(self, e):
         simple = True
@@ -1552,7 +1615,15 @@ class FnGen:
             return self.pattern_expr(target, self.expr(e.value))
         if op == "=":
             if target.t == "Ident":
-                return self.write_expr(self.lookup(target.name), target.name, self.expr(e.value, target.name))
+                plain = self.write_expr(self.lookup(target.name), target.name, self.expr(e.value, target.name))
+                if getattr(target, "withs", None):
+                    out = plain
+                    for w in reversed(target.withs):
+                        W = self.read(w, "%with")
+                        out = "(put(%s, %r, %s) if has_prop(%r, %s) else %s)" % (
+                            W, target.name, self.expr(e.value), target.name, W, out)
+                    return out
+                return plain
             return self.member_put(target, self.expr(e.value))
         if op in ("&&=", "||=", "??="):
             return self.logical_assign(e)
@@ -1633,7 +1704,7 @@ class FnGen:
         callee = e.callee
         args = self.args(e.args)
         if callee.t == "Super":
-            return "super_call(F, NT, [%s])" % args
+            return "super_call(F, NT, %s)" % (args[1:] if args.startswith("*") else "[%s]" % args)
         if callee.t == "Member":
             if callee.obj.t == "Super":
                 return "call(super_get(F.home, this, %s), this%s)" % (self.key(callee), ", " + args if args else "")
@@ -1641,21 +1712,35 @@ class FnGen:
             if callee.computed:
                 return "callv(%s, %s%s)" % (o, self.expr(callee.prop), ", " + args if args else "")
             return "callm(%s, %r%s)" % (o, callee.prop.value, ", " + args if args else "")
+        if callee.t == "Ident" and getattr(callee, "withs", None):
+            out = "call(%s, UNDEF%s)" % (self.read(getattr(callee, "b", None), callee.name), ", " + args if args else "")
+            for w in reversed(callee.withs):
+                W = self.read(w, "%with")
+                out = "(callv(%s, %r%s) if has_prop(%r, %s) else %s)" % (W, callee.name, ", " + args if args else "",
+                                                                         callee.name, W, out)
+            return out
         if callee.t == "Ident" and callee.name == "eval" and getattr(callee, "b", None) is None:
             return "direct_eval(%s)" % (args or "UNDEF")
         return "call(%s, UNDEF%s)" % (self.expr(callee), ", " + args if args else "")
 
     def args(self, args):
         out = []
+        spread = False
         for a in args:
             if a.t == "Spread":
                 out.append("*spread(%s)" % self.expr(a.arg))
+                spread = True
             else:
                 out.append(self.expr(a))
+        if spread:
+            return "*" + self.joined(out)
         return ", ".join(out)
 
     def e_New(self, e):
-        return "construct(%s, [%s])" % (self.expr(e.callee), self.args(e.args))
+        a = self.args(e.args)
+        if a.startswith("*"):
+            return "construct(%s, %s)" % (self.expr(e.callee), a[1:])
+        return "construct(%s, [%s])" % (self.expr(e.callee), a)
 
     def e_Member(self, e):
         if e.obj.t == "Super":
@@ -1842,14 +1927,16 @@ def _numbered(src):
     return "\n".join("%4d %s" % (i + 1, lines[i]) for i in range(min(len(lines), 400)))
 
 
-def compile_script(src, name, ns):
+def compile_script(src, name, ns, want_value=False):
     """A script -> a Python function to run it (with this = the global object)."""
+    src = ascii_source(src)
     tree = parse(src)
     an = Analyzer(tree.strict)
     fn = an.program(tree)
     layout(an.fns)
     unit = Unit(src, name, ns)
     unit.tree = tree
+    unit.want_value = want_value
     unit.ns_name = lambda info: _ns_name(ns, info)
     g = FnGen(fn, unit)
     pyname = "S%d" % _next_id()

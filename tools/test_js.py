@@ -1,4 +1,4 @@
-"""JavaScript in PyKernel: the QuickJS engine (_js), and the browser running
+"""JavaScript in SnakeyOS: the engine written in Python (pyos/lib/js), and the browser running
 pages' scripts against its DOM (browser/dom.js): DOM changes, fetch,
 timers, localStorage, clicks; and, when the npm registry can be reached,
 real React 18 and Vue 3 apps.
@@ -125,13 +125,13 @@ def main():
         m = T.Machine(make_disk(ROOT / "build" / "test-disk.img"))
         try:
             m.until(T.PROMPT, 90)
-            m.cmd("import media, _js; media.init(); c = _js.Context(lambda n, a: a)", 30)
-            check("QuickJS: classes, regexps, JSON", "'14|H0LA'" in m.cmd(
+            m.cmd("import js; c = js.Context(lambda n, a: a)", 60)
+            check("JS engine: classes, regexps, JSON", "'14|H0LA'" in m.cmd(
                 "c.eval('class A { get d() { return 7 * 2 } }; [new A().d, \"hola\".replace(/o/g, \"0\").toUpperCase()].join(\"|\")')", 30))
             out = m.cmd("c.eval('throw new TypeError(\"mal\")')", 30)
-            check("QuickJS: a script's error becomes a Python exception", "JSError" in out and "TypeError: mal" in out, out[-200:])
+            check("JS engine: a script's error becomes a Python exception", "JSError" in out and "TypeError: mal" in out, out[-200:])
             out = m.cmd("c.eval('while (true) {}', 'loop', 300)", 30)
-            check("QuickJS: a script that never ends is stopped", "ran too long" in out, out[-200:])
+            check("JS engine: a script that never ends is stopped", "ran too long" in out, out[-200:])
             m.cmd("exec(%r)" % GUEST, 60)
             m.cmd("p = load(%r)" % (base + "js.html"), 180)
             m.cmd("import time; time.sleep_ms(300); p.js.tick()", 60)      # the browser's clock, as the app runs it

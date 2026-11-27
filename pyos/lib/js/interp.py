@@ -118,6 +118,13 @@ def obj_rest(o, used):
     return out
 
 
+def xs(*parts):
+    out = []
+    for p in parts:
+        out.extend(p)
+    return out
+
+
 def nullish_or(a, b):
     return b if a is None or a is UNDEF else a
 
