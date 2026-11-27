@@ -10,6 +10,7 @@
 # video without sound (or a machine without a sound card) uses the timer.
 import time
 import _media
+from media import mp3 as _mp3
 import media
 from media import mp4
 
@@ -67,11 +68,11 @@ class Player:
             import os
             f = open(path, "rb")
             size = os.stat(path)[6]
-        self.mp3 = {"file": f, "dec": _media.MP3(), "buf": b"", "size": size, "pos": 0, "rate": 44100,
+        self.mp3 = {"file": f, "dec": _mp3.MP3(), "buf": b"", "size": size, "pos": 0, "rate": 44100,
                     "frame_bytes": 0}
         head = f.read(16384)
         f.seek(0)
-        dec = _media.MP3()
+        dec = _mp3.MP3()
         pcm, used = dec.decode(head)
         rate, chans = dec.format()
         dec.close()
