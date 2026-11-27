@@ -69,6 +69,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}         # the tag points at the code the ISO was built from
           name: SnakeyOS ${{ env.TAG }}
           body_path: docs/releases/${{ env.TAG }}.md
           files: |
