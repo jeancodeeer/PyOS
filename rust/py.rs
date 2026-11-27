@@ -41,6 +41,11 @@ extern "C" {
     fn vstr_clear(v: *mut Vstr);
     fn mp_obj_new_bytes_from_vstr(v: *mut Vstr) -> Obj;
     fn mp_raise_ValueError(msg: *const u8) -> !;
+    fn mp_raise_msg(ty: *const u8, msg: *const u8) -> !;
+    static mp_type_IndexError: u8;
+    static mp_type_OSError: u8;
+    static mp_type_RuntimeError: u8;
+    fn mp_obj_get_array(o: Obj, len: *mut usize, items: *mut *const Obj);
     fn mp_raise_TypeError(msg: *const u8) -> !;
 }
 
@@ -220,6 +225,28 @@ pub fn buffer(o: Obj) -> (*mut u8, usize) {
 pub fn value_error(msg: &'static [u8]) -> ! {
     unsafe { mp_raise_ValueError(msg.as_ptr()) }
 }
+pub fn index_error(msg: &'static [u8]) -> ! {
+    unsafe { mp_raise_msg(core::ptr::addr_of!(mp_type_IndexError), msg.as_ptr()) }
+}
+pub fn os_error(msg: &'static [u8]) -> ! {
+    unsafe { mp_raise_msg(core::ptr::addr_of!(mp_type_OSError), msg.as_ptr()) }
+}
+pub fn runtime_error(msg: &'static [u8]) -> ! {
+    unsafe { mp_raise_msg(core::ptr::addr_of!(mp_type_RuntimeError), msg.as_ptr()) }
+}
+
+/// The items of a list or tuple.
+pub fn items<'a>(o: Obj) -> &'a [Obj] {
+    let (mut n, mut p) = (0usize, core::ptr::null::<Obj>());
+    unsafe {
+        mp_obj_get_array(o, &mut n, &mut p);
+        if n == 0 {
+            return &[];
+        }
+        core::slice::from_raw_parts(p, n)
+    }
+}
+
 pub fn type_error(msg: &'static [u8]) -> ! {
     unsafe { mp_raise_TypeError(msg.as_ptr()) }
 }

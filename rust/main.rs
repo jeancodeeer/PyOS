@@ -24,6 +24,7 @@ mod cpu;
 mod interrupts;
 mod aes;
 mod fast;
+mod gfx;
 mod py;
 mod sched;
 mod serial;
@@ -282,6 +283,7 @@ unsafe fn python_session() {
     mpk_init();
     fast::register();                    // Python modules written in Rust
     aes::register();
+    gfx::register();
     interrupts::IN_VM.store(true, Relaxed);
     INFO[I_BOOTS].fetch_add(1, Relaxed);
 
