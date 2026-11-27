@@ -37,6 +37,9 @@ extern "C" {
     fn mp_obj_new_int_from_ull(v: u64) -> Obj;
     fn mp_obj_new_bytes(data: *const u8, len: usize) -> Obj;
     fn mp_obj_is_true(o: Obj) -> bool;
+    fn vstr_init_len(v: *mut Vstr, len: usize);
+    fn vstr_clear(v: *mut Vstr);
+    fn mp_obj_new_bytes_from_vstr(v: *mut Vstr) -> Obj;
     fn mp_raise_ValueError(msg: *const u8) -> !;
     fn mp_raise_TypeError(msg: *const u8) -> !;
 }
@@ -151,6 +154,47 @@ pub fn new_int(v: i64) -> Obj {
 }
 pub fn new_uint(v: u64) -> Obj {
     if v < (1u64 << 61) { new_int(v as i64) } else { unsafe { mp_obj_new_int_from_ull(v) } }
+}
+
+/// MicroPython's vstr_t: a growable buffer on the Python heap.
+#[repr(C)]
+pub struct Vstr {
+    alloc: usize,
+    len: usize,
+    buf: *mut u8,
+    fixed_buf: bool,
+}
+
+/// A bytes object of `len` bytes, filled in by `fill` (no copy).
+pub fn new_bytes_with(len: usize, fill: impl FnOnce(&mut [u8])) -> Obj {
+    unsafe {
+        let mut v = Vstr { alloc: 0, len: 0, buf: core::ptr::null_mut(), fixed_buf: false };
+        vstr_init_len(&mut v, len);
+        fill(core::slice::from_raw_parts_mut(v.buf, len));
+        mp_obj_new_bytes_from_vstr(&mut v)
+    }
+}
+
+/// Like new_bytes_with, but `fill` may decline (returns false): None then.
+pub fn new_bytes_or_none(len: usize, fill: impl FnOnce(&mut [u8]) -> bool) -> Obj {
+    unsafe {
+        let mut v = Vstr { alloc: 0, len: 0, buf: core::ptr::null_mut(), fixed_buf: false };
+        vstr_init_len(&mut v, len);
+        if !fill(core::slice::from_raw_parts_mut(v.buf, len)) {
+            vstr_clear(&mut v);
+            return NONE;
+        }
+        mp_obj_new_bytes_from_vstr(&mut v)
+    }
+}
+
+/// The bytes of a buffer object, as a slice.
+pub fn bytes<'a>(o: Obj) -> &'a [u8] {
+    let (p, n) = buffer(o);
+    if n == 0 {
+        return &[];
+    }
+    unsafe { core::slice::from_raw_parts(p, n) }
 }
 
 pub fn new_bytes(data: &[u8]) -> Obj {

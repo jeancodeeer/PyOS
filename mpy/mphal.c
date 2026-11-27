@@ -3,6 +3,7 @@
 // This file contains no policy and no hardware access of its own.
 
 #include <string.h>
+#include <stdio.h>
 #include "py/runtime.h"
 #include "py/gc.h"
 #include "py/mphal.h"
@@ -103,6 +104,14 @@ int mp_hal_stdin_rx_chr(void) {
         }
         // Rescue path: serial input works even with no Python driver loaded.
         c = rk_serial_rx();
+        if (c == 0x1D) {
+            extern uint8_t mpk_dbg_mask0(void);
+            char b[160];
+            int n = snprintf(b, sizeof(b), "\r\n[DBG sched_state=%d mask0=%d len=%d thread=%d]\r\n",
+                (int)MP_STATE_VM(sched_state), (int)mpk_dbg_mask0(), (int)MP_STATE_VM(sched_len), (int)mp_thread_get_id());
+            rk_serial_write(b, n);
+            continue;
+        }
         if (c >= 0) {
             mpk_feed(c);
             continue;
