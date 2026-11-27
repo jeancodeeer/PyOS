@@ -92,7 +92,10 @@ def _spectral(br, cb, n, out, o):
                 for k in range(4):
                     if vals[k] and br.bit():
                         vals[k] = -vals[k]
-            out[o:o + 4] = vals
+            out[o] = vals[0]
+            out[o + 1] = vals[1]
+            out[o + 2] = vals[2]
+            out[o + 3] = vals[3]
             o += 4
     elif cb <= 10:                                    # pairs
         while o < end:
@@ -191,7 +194,9 @@ def _twiddles(M):
         pre = [(math.cos(-math.pi * (n + 0.25) / M), math.sin(-math.pi * (n + 0.25) / M)) for n in range(H)]
         post = [(math.cos(-math.pi * k / M), math.sin(-math.pi * k / M)) for k in range(H)]
         rev = [0] * H
-        bits = H.bit_length() - 1
+        bits = 0
+        while (1 << bits) < H:
+            bits += 1
         for i in range(H):
             r = 0
             for b in range(bits):

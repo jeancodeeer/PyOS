@@ -9,9 +9,9 @@
 # The clock is the sound card's: the time of the samples already heard. A
 # video without sound (or a machine without a sound card) uses the timer.
 import time
-import _media
 from media import mp3 as _mp3
 from media import aac as _aac
+from media import h264 as _h264
 import media
 from media import mp4
 
@@ -49,7 +49,7 @@ class Player:
         self.duration = m.duration
         if m.video and m.video.codec in ("avc1", "avc3"):
             self.video = m.video
-            self.vdec = _media.H264()
+            self.vdec = _h264.H264()
             self.vdec.decode(m.video.headers)
             self.width, self.height = m.video.width, m.video.height
         elif m.video:
