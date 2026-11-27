@@ -6,3 +6,4 @@
 # third-party code: not counted in the language statistics
 mpy/js/quickjs/** linguist-vendored
 vendor/** linguist-vendored
+pyos/share/pywin/ejemplos/** linguist-documentation
