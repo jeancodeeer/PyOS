@@ -1,5 +1,5 @@
-# Image decoders written in Python: JPEG (baseline) and GIF. PNG and BMP
-# are in pygame.image; WebP comes from the kernel (libwebp, in machine code).
+# Image decoders written in Python: JPEG (baseline), GIF and WebP. PNG and
+# BMP are in pygame.image.
 # Each load() returns a pygame Surface.
 
 
@@ -29,12 +29,6 @@ def load(path_or_bytes, name=""):
 def webp(data):
     """A WebP picture (the web's most common format today), transparency included."""
     import pygame
-    try:
-        import _media
-    except ImportError:                       # not on PyKernel (a PC running the browser's tests)
-        import io
-        return pygame.image.load(io.BytesIO(data), "x.webp")
-    import media
-    media.init()                              # the decoder's memory
-    w, h, pixels = _media.webp(data)
-    return pygame.Surface((w, h), pygame.SRCALPHA, _buf=bytearray(pixels))
+    from imaging import webpdec
+    w, h, pixels = webpdec.decode(data)
+    return pygame.Surface((w, h), pygame.SRCALPHA, _buf=pixels)
