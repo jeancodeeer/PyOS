@@ -93,7 +93,16 @@ def main():
             if piece:
                 m.cmd("exec(%r)" % piece, 20)
             m.send(b"desktop\r")
-            m.until(T.PROMPT, 1800)
+            live = ROOT / "build" / "fuzz_live.log"
+            end = time.time() + 1800
+            while True:
+                try:
+                    m.until(T.PROMPT, 15)
+                    break
+                except TimeoutError:
+                    live.write_bytes(bytes(m.log))
+                    if time.time() > end:
+                        raise
             time.sleep(2)
             m.cmd("", 10)
             out = m.cmd("print(report)", 20)
