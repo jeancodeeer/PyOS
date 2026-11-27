@@ -2,6 +2,7 @@
 
     python tools/build.py            # everything
     python tools/build.py --fs       # only repack pyfs/ (after editing Python)
+    python tools/build.py --arch aarch64   # ARM64: build/aarch64/kernel.elf + BOOTAA64.EFI
 """
 import shutil
 import subprocess
@@ -33,6 +34,21 @@ def apply_patches():
             run(["git", "-C", str(vendor), "apply", str(patch)])
 
 
+def build_arm64():
+    """ARM64: the VM with aarch64-linux-gnu-gcc, the kernel as a position-independent
+    ELF, and the UEFI loader (boot/aarch64-efi)."""
+    apply_patches()
+    run(["make", "-C", "mpy", "-j8", "ARCH=aarch64"], cwd=ROOT)
+    run(["cargo", "build", "--release", "--target", "aarch64-unknown-none"], cwd=ROOT)
+    run(["cargo", "build", "--release", "--target", "aarch64-unknown-uefi"], cwd=ROOT / "boot" / "aarch64-efi")
+    out = ROOT / "build" / "aarch64"
+    out.mkdir(parents=True, exist_ok=True)
+    shutil.copy(ROOT / "target" / "aarch64-unknown-none" / "release" / "pykernel", out / "kernel.elf")
+    shutil.copy(ROOT / "boot" / "aarch64-efi" / "target" / "aarch64-unknown-uefi" / "release" / "bootaa64.efi",
+                out / "BOOTAA64.EFI")
+    print(f"kernel.elf: {(out / 'kernel.elf').stat().st_size} bytes, BOOTAA64.EFI: {(out / 'BOOTAA64.EFI').stat().st_size} bytes")
+
+
 def build_vm():
     if not (ROOT / "vendor" / "micropython" / "py").is_dir():
         # MicroPython v1.25.0 is a git submodule: fetch it the first time
@@ -62,6 +78,10 @@ def build_fs():
 
 
 if __name__ == "__main__":
+    if "--arch" in sys.argv and sys.argv[sys.argv.index("--arch") + 1] == "aarch64":
+        build_arm64()
+        build_fs()
+        sys.exit(0)
     if "--fs" not in sys.argv:
         build_vm()
         build_kernel()

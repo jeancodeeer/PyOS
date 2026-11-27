@@ -114,6 +114,8 @@ class Device:
             cls, sub, proto = iface["class"]
             if cls == 3 and sub == 1 and proto in (1, 2):
                 return self._hid(iface, "keyboard" if proto == 1 else "mouse")
+            if cls == 3 and sub == 0 and iface["endpoints"]:
+                return self._hid(iface, "tablet")                 # absolute pointer (QEMU's usb-tablet, touch screens)
             if cls == 8 and sub == 6 and proto == 0x50:
                 return self._storage(iface)
         self.kind = "class %02x" % (interfaces[0]["class"][0] if interfaces else 0)
@@ -147,7 +149,8 @@ class Device:
     # ---- keyboards and mice ----
     def _hid(self, iface, kind):
         self.kind = kind
-        self.control(0x21, 0x0B, 0, iface["number"])              # SET_PROTOCOL: boot reports
+        if kind != "tablet":
+            self.control(0x21, 0x0B, 0, iface["number"])          # SET_PROTOCOL: boot reports
         self.control(0x21, 0x0A, 0, iface["number"])              # SET_IDLE
         ep = [e for e in iface["endpoints"] if e[0] & 0x80][0]
         self.hid_dci = self._configure([ep])[0]
@@ -165,6 +168,12 @@ class Device:
         data = bytes(self.report[:self.report_len])
         if self.kind == "keyboard":
             self._keyboard(data)
+        elif self.kind == "tablet":                               # buttons, x, y (0..32767), wheel
+            from kernel import mouse
+            if len(data) >= 5:
+                tx = struct.unpack_from("<H", data, 1)[0] * mouse.bounds[0] // 32768
+                ty = struct.unpack_from("<H", data, 3)[0] * mouse.bounds[1] // 32768
+                mouse.move(tx - mouse.x, ty - mouse.y, data[0] & 7, absolute=True)
         else:
             from kernel import mouse
             dx = data[1] - 256 if data[1] > 127 else data[1]

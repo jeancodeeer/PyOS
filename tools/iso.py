@@ -2,6 +2,11 @@
 
     python tools/iso.py            # -> build/snakeyos.iso (PyKernel + SnakeyOS)
     python tools/iso.py --boot     # ...and boot it in QEMU to check
+    python tools/iso.py --arch aarch64   # -> build/snakeyos-arm64.iso (UEFI, ARM64)
+
+The ARM64 image is a UEFI one: BOOTAA64.EFI (boot/aarch64-efi) with
+kernel.elf and pyfs.img on a FAT boot partition (El Torito and, for USB
+sticks, a GPT partition too).
 
 PYKERNEL_ONLY=1 makes build/pykernel.iso, the kernel without SnakeyOS.
 Write the .iso to a USB stick with any image writer (Rufus in
@@ -56,7 +61,37 @@ def build_iso() -> Path:
     return iso
 
 
+def build_iso_arm64() -> Path:
+    out = ROOT / "build" / "aarch64"
+    kernel, loader = out / "kernel.elf", out / "BOOTAA64.EFI"
+    if not kernel.is_file() or not loader.is_file():
+        sys.exit("build/aarch64 is missing: run  python tools/build.py --arch aarch64")
+    mkfs.pack(ROOT / "pyfs", ROOT / "build" / "pyfs.img")
+    tree = ROOT / "build" / "iso-arm64"
+    shutil.rmtree(tree, ignore_errors=True)
+    tree.mkdir(parents=True)
+    efi = tree / "efi.img"
+    need = kernel.stat().st_size + loader.stat().st_size + (ROOT / "build" / "pyfs.img").stat().st_size
+    mib = need // (1 << 20) + 8
+    with open(efi, "wb") as f:
+        f.truncate(mib << 20)
+    run = lambda *c: subprocess.run(list(c), check=True, capture_output=True)
+    run("mformat", "-i", str(efi), "-v", "SNAKEYOS", "::")   # FAT16: what the size calls for (UEFI is strict)
+    run("mmd", "-i", str(efi), "::/EFI", "::/EFI/BOOT", "::/snakeyos")
+    run("mcopy", "-i", str(efi), str(loader), "::/EFI/BOOT/BOOTAA64.EFI")
+    run("mcopy", "-i", str(efi), str(kernel), "::/snakeyos/kernel.elf")
+    run("mcopy", "-i", str(efi), str(ROOT / "build" / "pyfs.img"), "::/snakeyos/pyfs.img")
+    iso = ROOT / "build" / "snakeyos-arm64.iso"
+    run("xorriso", "-as", "mkisofs", "-o", str(iso), "-R", "-J", "-V", "SNAKEYOS_ARM64",
+        "-e", "efi.img", "-no-emul-boot", "-append_partition", "2", "0xef", str(efi), str(tree))
+    print(f"{iso.name}: {iso.stat().st_size >> 10} KiB")
+    return iso
+
+
 if __name__ == "__main__":
+    if "--arch" in sys.argv and sys.argv[sys.argv.index("--arch") + 1] == "aarch64":
+        build_iso_arm64()
+        sys.exit(0)
     iso = build_iso()
     if "--boot" in sys.argv:
         qemu = ["wsl", "-e", "qemu-system-x86_64"] if uses_wsl() else ["qemu-system-x86_64"]

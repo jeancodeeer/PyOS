@@ -32,6 +32,9 @@ def _reg(i, value=None):
 
 
 def available():
+    from kernel.arch import ARM, info
+    if ARM:
+        return bool(info("fb_addr"))
     return 0xB0C0 <= _reg(R_ID) <= 0xB0CF
 
 
@@ -152,6 +155,16 @@ _text_regs = None
 def set_mode(width=640, height=480):
     """Switch to a width x height, 32 bpp graphics mode."""
     global current, _text_regs
+    from kernel.arch import ARM, info
+    if ARM:                              # ARM64: the screen UEFI set up; its size is fixed
+        if not info("fb_addr"):
+            raise OSError("no screen (UEFI gave no framebuffer)")
+        if current is None and console.current:
+            console.current.detach()
+        current = Framebuffer(info("fb_addr"), info("fb_width"), info("fb_height"))
+        current.pitch = info("fb_pitch")
+        current.buf = uctypes.bytearray_at(current.addr, current.pitch * current.height)
+        return current
     if not available():
         raise OSError("no Bochs/QEMU/VirtualBox display adapter (BGA)")
     font()                               # keep the font: graphics overwrite it
@@ -180,6 +193,12 @@ def text_mode():
     """Back to the 80x25 text console."""
     global current
     if current is None:
+        return
+    from kernel.arch import ARM
+    if ARM:
+        current = None
+        if console.current:
+            console.current.attach()
         return
     _reg(R_ENABLE, 0)
     current = None

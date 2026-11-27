@@ -60,7 +60,7 @@
 #
 #elif defined(__GNUC__) && defined(__i386__)
 #
-#elif defined(__GNUC__) && defined(__amd64__)
+#elif defined(__GNUC__) && (defined(__amd64__) || defined(__aarch64__))
 #
 #elif defined(__GNUC__) && (defined(__powerpc__) || defined(__POWERPC__))
 #

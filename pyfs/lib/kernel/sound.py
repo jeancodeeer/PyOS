@@ -9,6 +9,7 @@
 # callback keeps the buffers it has already played filled with what comes
 # next, so long sounds stream without holding up Python.
 import struct
+from kernel import arch as _arch   # ARM64: C versions of the viper functions
 import math
 import micropython
 from kernel import timer, log
@@ -68,6 +69,7 @@ def _widen(src: ptr8, n: int, dst: ptr8, channels: int, bits: int):
             dst[o + 3] = src[i + 1]
             i += 2
         o += 4
+_widen = _arch.fast(_widen, 'sound_widen')
 
 
 @micropython.viper
@@ -76,6 +78,7 @@ def _stretch(src: ptr32, n: int, dst: ptr32, out_n: int, rate: int, target: int)
     while k < out_n:
         dst[k] = src[k * rate // target]
         k += 1
+_stretch = _arch.fast(_stretch, 'sound_stretch')
 
 
 def _resample(data, rate):

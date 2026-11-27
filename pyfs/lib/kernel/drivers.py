@@ -47,7 +47,8 @@ def init_all():
     started = []
     try:
         from kernel import lpt
-        if lpt.init():
+        from kernel.arch import ARM
+        if not ARM and lpt.init():
             started.append("printer ports (%s)" % ", ".join(p.name for p in lpt.ports))
     except Exception as e:
         log.warn("lpt: %r" % e)

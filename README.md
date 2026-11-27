@@ -74,8 +74,9 @@ Operating systems written in high-level languages exist (Singularity in C#, Redo
 
 | YOU HAVE | DO THIS |
 |---|---|
-| **QEMU** | Download `pyos-1.0.iso` from [Releases](https://github.com/jeancodeeer/SnakeyOS/releases/latest), then `qemu-system-x86_64 -m 768 -cdrom pyos-1.0.iso -nic user,model=virtio-net-pci -device AC97` and type `desktop` (or `tour()` for the guided tour). |
-| **A USB stick** | Write the ISO with Rufus (DD mode), balenaEtcher or `dd` and boot it in legacy BIOS / CSM mode. |
+| **A PC, or QEMU** | Download `SnakeyOSx86.iso` from [Releases](https://github.com/jeancodeeer/SnakeyOS/releases/latest), then `qemu-system-x86_64 -m 768 -cdrom SnakeyOSx86.iso -nic user,model=virtio-net-pci -device AC97`. It boots straight into the desktop. |
+| **An ARM64 machine** (UEFI) | Download `SnakeyOSARM64.iso`. It runs on QEMU `virt` (`tools/run_arm64.sh`), ARM servers, and Raspberry Pi 4/5 with UEFI firmware. See the [1.2.0 notes](docs/releases/v1.2.0.md). |
+| **A USB stick** | Write the ISO with Rufus (DD mode), balenaEtcher or `dd`. On PCs, boot it in BIOS/CSM or UEFI mode; on ARM64, the firmware finds it through UEFI. |
 | **The source** | `python tools/build.py && python tools/run.py` (see [Build it yourself](#07--build-it-yourself)). |
 
 At the `>>>` prompt everything is Python. A few commands: `desktop`, `tour()`, `lsdrv`, `ifconfig`, `ping('10.0.2.2')`, `procs`, `ls('/apps')`, `pyos_autostart(True)` to boot straight into the desktop.
@@ -132,7 +133,7 @@ PyKernel knows nothing about SnakeyOS: at boot it runs `/etc/init.d/*.py`, and [
 
 ## 07 — BUILD IT YOURSELF
 
-You need Python 3, Rust (`rustup target add x86_64-unknown-none`, `rustup component add llvm-tools`), gcc and make for the MicroPython VM, QEMU to run it, and `grub-pc-bin xorriso mtools` for the ISO.
+You need Python 3, Rust (`rustup target add x86_64-unknown-none`, `rustup component add llvm-tools`), gcc and make for the MicroPython VM, QEMU to run it, and `grub-pc-bin xorriso mtools` for the ISO. For ARM64 you also need `rustup target add aarch64-unknown-none aarch64-unknown-uefi` and `gcc-aarch64-linux-gnu`.
 
 ```bash
 git clone --recursive https://github.com/jeancodeeer/SnakeyOS
@@ -140,9 +141,12 @@ cd SnakeyOS
 python tools/build.py          # MicroPython VM + Rust kernel + boot image
 python tools/run.py            # boot in QEMU
 python tools/iso.py            # build/snakeyos.iso
+python tools/build.py --arch aarch64 && python tools/iso.py --arch aarch64   # build/snakeyos-arm64.iso
+tools/run_arm64.sh             # boot it in QEMU (qemu-system-arm, qemu-efi-aarch64)
 python tools/test.py           # kernel checks (89)
 python tools/test_desktop.py   # desktop and apps (16)
 python tools/test_pywin.py     # PyWin and OpenGL (13)
+python tools/test_fast.py      # the C code ARM64 uses instead of viper == viper
 ```
 
 After editing only Python, `python tools/build.py --fs` repacks the files in a second. The [release workflow](.github/workflows/release.yml) builds the ISO the same way.

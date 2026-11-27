@@ -14,6 +14,9 @@ def _on_irq(vector):
 
 
 def init():
+    from kernel.arch import ARM
+    if ARM:                                  # ARM64: the console reads the UART (PL011) itself (mpy/mphal.c)
+        return
     irq.register(pic.vector(4), _on_irq)
     outb(PORT + 1, 0x01)                     # interrupt on received data
     pic.enable(4)

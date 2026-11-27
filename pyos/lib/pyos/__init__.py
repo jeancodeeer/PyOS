@@ -4,7 +4,7 @@
 # processes, the console. SnakeyOS (pyos/) is what people use on top of it: the
 # desktop, the apps, the web browser, fonts, sounds and images.
 NAME = "SnakeyOS"
-VERSION = "1.1.0"          # the version this image was built as; updates write theirs in /etc/version
+VERSION = "1.2.0"          # the version this image was built as; updates write theirs in /etc/version
 
 
 _running = None

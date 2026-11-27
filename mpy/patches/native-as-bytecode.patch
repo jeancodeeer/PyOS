@@ -1,0 +1,16 @@
+diff --git a/py/compile.c b/py/compile.c
+index 7a1151b..7486acf 100644
+--- a/py/compile.c
++++ b/py/compile.c
+@@ -852,6 +852,11 @@ static bool compile_built_in_decorator(compiler_t *comp, size_t name_len, mp_par
+         *emit_options = MP_EMIT_OPT_NATIVE_PYTHON;
+     } else if (attr == MP_QSTR_viper) {
+         *emit_options = MP_EMIT_OPT_VIPER;
++    #elif defined(MICROPY_PYKERNEL_NATIVE_AS_BYTECODE)
++    } else if (attr == MP_QSTR_native || attr == MP_QSTR_viper) {
++        // PyKernel on a CPU without a native emitter (ARM64): plain bytecode;
++        // its viper functions have C stand-ins (mpy/modfast.c)
++        *emit_options = MP_EMIT_OPT_BYTECODE;
+     #endif
+         #if MICROPY_EMIT_INLINE_ASM
+     #if MICROPY_DYNAMIC_COMPILER

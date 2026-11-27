@@ -754,6 +754,10 @@ def mounts():
 
 
 def cpu_name():
+    from kernel.arch import ARM
+    if ARM:
+        from kernel import arch
+        return arch.cpu_name()
     if _kernel.cpuid(0x80000000)[0] < 0x80000004:
         return "x86_64"
     raw = b"".join(reg.to_bytes(4, "little") for leaf in (0x80000002, 0x80000003, 0x80000004) for reg in _kernel.cpuid(leaf))

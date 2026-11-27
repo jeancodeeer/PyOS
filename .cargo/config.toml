@@ -10,3 +10,15 @@ rustflags = [
     # exception reports go through mpy/mphal.c, which can hand them to Python
     "-C", "link-arg=--wrap=mp_obj_print_exception",
 ]
+
+# ARM64: python tools/build.py --arch aarch64 (a position-independent ELF for boot/aarch64-efi)
+[target.aarch64-unknown-none]
+rustflags = [
+    "-C", "relocation-model=pie",
+    "-C", "link-arg=-pie",
+    "-C", "link-arg=--no-dynamic-linker",
+    "-C", "link-arg=-Trust/arm64/linker.ld",
+    "-C", "link-arg=-zmax-page-size=0x1000",
+    "-C", "link-arg=--gc-sections",
+    "-C", "link-arg=--wrap=mp_obj_print_exception",
+]

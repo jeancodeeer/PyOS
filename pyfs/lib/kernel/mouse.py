@@ -60,10 +60,12 @@ def _config_locked(update):
     outb(0x60, cfg)
 
 
-def move(dx, dy, new_buttons):
-    """Any pointing device (PS/2 here, USB in usb.py) reports movement here."""
-    global x, y, buttons
-    if speed != 1.0:
+def move(dx, dy, new_buttons, absolute=False):
+    """Any pointing device (PS/2 here, USB in usb.py) reports movement here
+    (absolute: a tablet or touch screen, which the speed setting must not scale)."""
+    global x, y, buttons, present
+    present = True
+    if speed != 1.0 and not absolute:
         dx, dy = int(round(dx * speed)), int(round(dy * speed))
     if left_handed:                       # bit 0 = left, bit 1 = right
         new_buttons = (new_buttons & ~3) | ((new_buttons & 1) << 1) | ((new_buttons & 2) >> 1)
@@ -102,6 +104,10 @@ def _on_irq(vector):
 def init():
     """Find and switch on the mouse. Returns True if there is one."""
     global present
+    from kernel.arch import ARM
+    if ARM:                          # no PS/2: a USB mouse (kernel/usb.py) moves this one
+        present = False
+        return False
     vector = pic.vector(IRQ)
     # mouse bytes: output buffer full (bit 0) and from the mouse (bit 5)
     _kernel.irq_fifo(vector, 0x64, 0x21, 0x21, 0x60)
