@@ -164,7 +164,7 @@ class WindowManager:
         except Exception as e:
             print("settings:", repr(e))
         wm = self
-        self.screen = pygame.display.set_mode(T.SCREEN)
+        self.screen = T.open_screen()
         pygame.display.set_caption("PyKernel")
         try:
             pygame.key.set_repeat(350, 40)
@@ -305,7 +305,7 @@ class WindowManager:
                 pass
             import gc
             gc.collect()
-            self.screen = display.set_mode(T.SCREEN)
+            self.screen = T.open_screen()
             pygame.event.get()                              # drop what the program left behind
             for w in self.windows:
                 w.dirty = True
@@ -447,8 +447,14 @@ class WindowManager:
 
     def set_resolution(self, width, height):
         """Change the screen mode and fit the windows into the new size."""
-        T.SCREEN = (width, height)
-        self.screen = pygame.display.set_mode(T.SCREEN)
+        old = T.SCREEN
+        try:
+            self.screen = pygame.display.set_mode((width, height))
+            T.SCREEN = (width, height)
+        except (ValueError, OSError):
+            self.screen = T.open_screen(old)          # the screen stays as it was
+            raise
+        width, height = T.SCREEN
         for w in self.windows:
             w.x = max(0, min(w.x, width - 120))
             w.y = max(T.TOP_H, min(w.y, height - T.DOCK_H - T.TITLE_H - 40))

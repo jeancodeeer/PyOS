@@ -74,3 +74,20 @@ def apply(new_mode=None, accent=None):
             SELECT = tuple(255 - (255 - c) // 6 for c in ACCENT)
         elif mode == "oscuro":
             SELECT = tuple(c // 3 + 20 for c in ACCENT)
+
+
+def open_screen(size=None):
+    """The screen in graphics mode at size (SCREEN when None). When the display cannot
+    show it, a smaller mode that works (and SCREEN follows): never a black screen."""
+    global SCREEN
+    import pygame
+    tries = [tuple(size or SCREEN), (1280, 800), (1024, 768), (800, 600), (640, 480)]
+    last = None
+    for s in tries:
+        try:
+            screen = pygame.display.set_mode(s)
+            SCREEN = tuple(screen.get_size())
+            return screen
+        except (ValueError, OSError) as e:
+            last = e
+    raise last

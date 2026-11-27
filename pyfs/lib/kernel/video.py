@@ -17,6 +17,7 @@ from kernel import console, irq, log, pci
 INDEX, DATA = 0x1CE, 0x1CF
 R_ID, R_XRES, R_YRES, R_BPP, R_ENABLE = 0, 1, 2, 3, 4
 R_VIRT_W, R_VIRT_H, R_X_OFF, R_Y_OFF = 6, 7, 8, 9
+R_VIDEO_MEMORY_64K = 0x0A
 ENABLED, LFB = 0x01, 0x40
 DEVICES = ((0x1234, 0x1111), (0x80EE, 0xBEEF))   # QEMU/Bochs, VirtualBox
 
@@ -152,6 +153,27 @@ _text_regs = None
 
 # ---- modes ----
 
+def video_memory():
+    """Bytes of video memory the adapter has (16 MiB when it does not say)."""
+    from kernel.arch import ARM, info
+    if ARM:
+        return info("fb_pitch") * info("fb_height") if info("fb_addr") else 0
+    if not available():
+        return 0
+    k = _reg(R_VIDEO_MEMORY_64K) if _reg(R_ID) >= 0xB0C5 else 0
+    return k * 65536 if k else 16 << 20
+
+
+def supported(width, height):
+    """Can the adapter show width x height at 32 bpp? (Bochs wants widths in steps of 8.)"""
+    from kernel.arch import ARM, info
+    if ARM:
+        return info("fb_addr") and width <= info("fb_width") and height <= info("fb_height")
+    if width % 8 or width < 320 or height < 200 or width > 2560 or height > 1600:
+        return False
+    return width * height * 4 <= video_memory()
+
+
 def set_mode(width=640, height=480):
     """Switch to a width x height, 32 bpp graphics mode."""
     global current, _text_regs
@@ -167,6 +189,10 @@ def set_mode(width=640, height=480):
         return current
     if not available():
         raise OSError("no Bochs/QEMU/VirtualBox display adapter (BGA)")
+    if not supported(width, height):
+        # refused before touching the adapter: the screen stays as it was
+        raise ValueError("the adapter cannot do %dx%d (%d KB of video memory)" %
+                         (width, height, video_memory() // 1024))
     font()                               # keep the font: graphics overwrite it
     if current is None:
         with irq.critical():
@@ -182,7 +208,13 @@ def set_mode(width=640, height=480):
     _reg(R_Y_OFF, 0)
     _reg(R_ENABLE, ENABLED | LFB)
     if (_reg(R_XRES), _reg(R_YRES)) != (width, height):
-        text_mode()
+        old = current
+        if old is not None:
+            # back to the mode that worked, so the desktop keeps its screen
+            current = None
+            set_mode(old.width, old.height)
+        else:
+            text_mode()
         raise ValueError("the adapter cannot do %dx%d" % (width, height))
     current = Framebuffer(framebuffer_address(), width, height)
     log.info("video: %dx%d, 32 bpp at 0x%x" % (width, height, current.addr))

@@ -160,11 +160,13 @@ class Settings(App):
 
     # 0 Pantalla
     def page_0(self, x, cw):
-        self.row("Resolucion", "Cuantos puntos tiene la pantalla",
-                 Choice((x, self.y + 10, cw, 26), "resolucion", S.RESOLUTIONS[:5],
-                        [r.replace("x", "×") for r in S.RESOLUTIONS[:5]]))
-        self.row("", "", Choice((x, self.y - 22, cw, 26), "resolucion", S.RESOLUTIONS[5:],
-                                [r.replace("x", "×") for r in S.RESOLUTIONS[5:]]), h=36)
+        modes = S.resolutions() or ["1024x768"]
+        self.row("Resolucion", "Las que esta pantalla puede mostrar",
+                 Choice((x, self.y + 10, cw, 26), "resolucion", modes[:5],
+                        [r.replace("x", "×") for r in modes[:5]]))
+        if len(modes) > 5:
+            self.row("", "", Choice((x, self.y - 22, cw, 26), "resolucion", modes[5:],
+                                    [r.replace("x", "×") for r in modes[5:]]), h=36)
         self.row("Tamano del texto", "Letras mas grandes en menus y ventanas",
                  Choice((x, self.y + 10, cw, 26), "escala_texto", (100, 110, 125, 150),
                         ["100%", "110%", "125%", "150%"], after=self.build))
