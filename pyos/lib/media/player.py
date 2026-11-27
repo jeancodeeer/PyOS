@@ -11,6 +11,7 @@
 import time
 import _media
 from media import mp3 as _mp3
+from media import aac as _aac
 import media
 from media import mp4
 
@@ -55,7 +56,7 @@ class Player:
             self.error = "este vídeo usa el códec %s; SnakeyOS reproduce H.264" % m.video.codec
         if m.audio and m.audio.codec == "mp4a" and m.audio.config:
             self.audio = m.audio
-            self.adec = _media.AAC(m.audio.config)
+            self.adec = _aac.AAC(m.audio.config)
         if not self.video and not self.audio:
             raise ValueError(self.error or "el archivo no tiene vídeo H.264 ni sonido AAC")
 
