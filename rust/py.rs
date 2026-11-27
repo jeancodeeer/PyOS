@@ -46,6 +46,9 @@ extern "C" {
     static mp_type_OSError: u8;
     static mp_type_RuntimeError: u8;
     fn mp_obj_get_array(o: Obj, len: *mut usize, items: *mut *const Obj);
+    fn mp_obj_list_append(list: Obj, item: Obj) -> Obj;
+    fn mp_sched_lock();
+    fn mp_sched_unlock();
     fn mp_raise_TypeError(msg: *const u8) -> !;
 }
 
@@ -245,6 +248,45 @@ pub fn items<'a>(o: Obj) -> &'a [Obj] {
         }
         core::slice::from_raw_parts(p, n)
     }
+}
+
+/// The items of a list, to change in place.
+pub fn items_mut<'a>(o: Obj) -> &'a mut [Obj] {
+    let s = items(o);
+    unsafe { core::slice::from_raw_parts_mut(s.as_ptr() as *mut Obj, s.len()) }
+}
+
+/// mp_obj_list_t: base, alloc, len, items.
+#[repr(C)]
+struct List {
+    base: usize,
+    alloc: usize,
+    len: usize,
+    items: *mut Obj,
+}
+
+pub fn list_append(list: Obj, item: Obj) {
+    unsafe { mp_obj_list_append(list, item) };
+}
+pub fn list_truncate(list: Obj, len: usize) {
+    unsafe {
+        let l = list as *mut List;
+        if (*l).len > len {
+            (*l).len = len;
+        }
+    }
+}
+
+pub fn sched_lock() {
+    unsafe { mp_sched_lock() }
+}
+pub fn sched_unlock() {
+    unsafe { mp_sched_unlock() }
+}
+
+/// A qstr as an object (object representation A: q << 3 | 2).
+pub fn qstr_obj(name: &str) -> Obj {
+    (qstr(name) << 3) | 2
 }
 
 pub fn type_error(msg: &'static [u8]) -> ! {

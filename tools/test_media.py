@@ -1,4 +1,4 @@
-"""Video and sound playback (media/, the kernel's _media decoders) in QEMU.
+"""Video and sound playback (media/: the decoders in Python) in QEMU.
 
 Makes a short MP4 (H.264 Baseline + AAC) and an MP3 with ffmpeg, puts them
 on a FAT disk, boots PyKernel and plays them.
@@ -53,20 +53,20 @@ def main():
         m = T.Machine(disk)
         try:
             m.until(T.PROMPT, 90)
-            m.cmd("import media, _media; from media import mp4, player; media.init()", 30)
+            m.cmd("import media; from media import mp4, player, h264, aac, mp3", 30)
             info = value(m, "(lambda v: (v.video.codec, v.video.width, v.video.height, v.audio.codec, "
                             "v.audio.rate, round(v.duration, 1), v.video.count()))(mp4.open_file('/disk/prueba.mp4'))")
             check("MP4: H.264 and AAC tracks, size, length, frames", info == ("avc1", 320, 240, "mp4a", 44100, 3.0, 75)
                   or (isinstance(info, tuple) and info[:4] == ("avc1", 320, 240, "mp4a") and abs(info[5] - 3) < 0.2))
-            m.cmd("mv = mp4.open_file('/disk/prueba.mp4'); d = _media.H264(); d.decode(mv.video.headers)", 30)
-            pics = value(m, "sum(d.decode(mv.video.read(i)) for i in range(10))")
+            m.cmd("mv = mp4.open_file('/disk/prueba.mp4'); d = h264.H264(); d.decode(mv.video.headers)", 30)
+            pics = value(m, "sum(d.decode(mv.video.read(i)) for i in range(10))", 600)
             check("H.264: ten frames give ten pictures", pics == 10)
             check("H.264: picture size", value(m, "d.crop()[2:]") == (320, 240))
             m.cmd("import pygame; s = pygame.Surface((320, 240)); d.draw(s._buf, 320, 240, 0, 0, 320, 240)", 30)
             check("H.264: the picture is drawn (not black)", value(m, "max(s._buf[i] for i in range(0, 76800 * 4, 997))") > 40)
-            m.cmd("a = _media.AAC(mv.audio.config); pcm = b''.join(a.decode(mv.audio.read(i)) for i in range(20))", 30)
+            m.cmd("a = aac.AAC(mv.audio.config); pcm = b''.join(a.decode(mv.audio.read(i)) for i in range(20))", 300)
             check("AAC: sound comes out, 44.1 kHz", value(m, "(len(pcm) > 40000, a.format()[0])") == (True, 44100))
-            m.cmd("mp = _media.MP3(); out = mp.decode(open('/disk/tono.mp3', 'rb').read(16384))", 30)
+            m.cmd("mp = mp3.MP3(); out = mp.decode(open('/disk/tono.mp3', 'rb').read(16384))", 300)
             check("MP3: sound comes out, 44.1 kHz", value(m, "(len(out[0]) > 1000, out[1] > 0, mp.format()[0])")
                   == (True, True, 44100))
             # real time: play for two seconds with the sound card's clock

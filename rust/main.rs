@@ -25,6 +25,8 @@ mod interrupts;
 mod aes;
 mod fast;
 mod gfx;
+mod kmod;
+mod port;
 mod py;
 mod sched;
 mod serial;
@@ -40,10 +42,6 @@ extern "C" {
     fn mp_init();
     fn mp_deinit();
     fn gc_init(start: *mut u8, end: *mut u8);
-    fn mpk_cstack_init(top: *const u8, size: usize);
-    fn mpk_init();
-    fn mpk_exec(name: *const u8, src: *const u8, len: usize) -> i32;
-    fn mpk_repl();
 }
 
 // ---- boot information, readable from Python via _kernel.info() ----
@@ -277,11 +275,13 @@ unsafe fn python_session() {
     let stack_top = core::ptr::addr_of!(boot_stack_top);
     let stack_len = stack_top as usize - core::ptr::addr_of!(boot_stack) as usize;
     sched::reset(stack_top as u64);
-    mpk_cstack_init(stack_top, stack_len - 0x8000);
+    port::mpk_cstack_init(stack_top, stack_len - 0x8000);
     gc_init(INFO[I_HEAP_START].load(Relaxed) as *mut u8, INFO[I_HEAP_END].load(Relaxed) as *mut u8);
     mp_init();
-    mpk_init();
-    fast::register();                    // Python modules written in Rust
+    port::after_mp_init();
+    port::init();
+    kmod::register();                    // the Python modules written in Rust
+    fast::register();
     aes::register();
     gfx::register();
     interrupts::IN_VM.store(true, Relaxed);
@@ -289,11 +289,11 @@ unsafe fn python_session() {
 
     match find_init() {
         Some((src, len)) => {
-            mpk_exec(b"init.py\0".as_ptr(), src, len);
+            port::mpk_exec(b"init.py\0".as_ptr(), src, len);
         }
         None => klog!("boot: no init.py in the boot archive; bare console only"),
     }
-    mpk_repl();
+    port::mpk_repl();
 
     cpu::rk_cli();
     sched::reset(stack_top as u64);      // background threads die with the VM
