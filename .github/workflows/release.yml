@@ -32,7 +32,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends grub-pc-bin grub-efi-amd64-bin grub-common xorriso mtools \
-            qemu-system-x86 qemu-system-arm qemu-efi-aarch64 gcc-aarch64-linux-gnu
+            qemu-system-x86 qemu-system-arm qemu-efi-aarch64 gcc-aarch64-linux-gnu libc6-dev-arm64-cross
 
       - name: Rust for a bare-metal x86_64 target
         uses: dtolnay/rust-toolchain@stable
