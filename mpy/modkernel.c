@@ -218,6 +218,7 @@ static mp_obj_t k_threads(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(k_threads_obj, k_threads);
 
 static uint8_t async_mask[32];
+uint8_t mpk_dbg_mask0(void) { return async_mask[0]; }
 MP_REGISTER_ROOT_POINTER(mp_obj_t mpk_async_deferred[32]);
 
 void mpk_async_reset(uint32_t id) {

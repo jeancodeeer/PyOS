@@ -22,6 +22,10 @@ mod cpu;
 #[cfg(target_arch = "aarch64")]
 #[path = "arm64/interrupts.rs"]
 mod interrupts;
+mod aes;
+mod fast;
+mod gfx;
+mod py;
 mod sched;
 mod serial;
 
@@ -277,6 +281,9 @@ unsafe fn python_session() {
     gc_init(INFO[I_HEAP_START].load(Relaxed) as *mut u8, INFO[I_HEAP_END].load(Relaxed) as *mut u8);
     mp_init();
     mpk_init();
+    fast::register();                    // Python modules written in Rust
+    aes::register();
+    gfx::register();
     interrupts::IN_VM.store(true, Relaxed);
     INFO[I_BOOTS].fetch_add(1, Relaxed);
 
