@@ -69,6 +69,7 @@ Operating systems written in high-level languages exist (Singularity in C#, Redo
 - **Speed.** It is Python (MicroPython) all the way. Pixel loops use viper (MicroPython's native code), but QEMU without KVM runs the 3D demo at a few frames per second.
 - **Hardware.** Tested in QEMU. Drivers exist for real devices (AHCI, NVMe, xHCI USB, e1000, RTL8139, virtio, AC'97), but SnakeyOS has not been tried on many real PCs.
 - **PyWin** runs 64-bit programs only. Threads are real but take turns. There is no DirectX, no Windows networking (`ws2_32`) and no dialog boxes from resources. A program that computes without calling Windows holds the desktop until it does.
+- **No C of its own**: the kernel is Rust, everything above it is Python — the WebP, MP3, AAC and H.264 decoders too. Only MicroPython's VM and QuickJS (until the JavaScript engine in Python is done) are C.
 - **Python** is MicroPython 1.25, not CPython: C extensions (numpy…) do not load.
 - **The browser** draws HTML and CSS but does not run JavaScript.
 
@@ -148,7 +149,7 @@ tools/run_arm64.sh             # boot it in QEMU (qemu-system-arm, qemu-efi-aarc
 python tools/test.py           # kernel checks (89)
 python tools/test_desktop.py   # desktop and apps (16)
 python tools/test_pywin.py     # PyWin and OpenGL (13)
-python tools/test_fast.py      # the C code ARM64 uses instead of viper == viper
+python tools/test_fast.py      # the Rust code ARM64 uses instead of viper == viper
 ```
 
 After editing only Python, `python tools/build.py --fs` repacks the files in a second. The [release workflow](.github/workflows/release.yml) builds the ISO the same way.

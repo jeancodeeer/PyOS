@@ -69,6 +69,7 @@ Hay sistemas operativos escritos en lenguajes de alto nivel (Singularity en C#, 
 - **Velocidad.** Es Python (MicroPython) de arriba abajo. Los bucles de píxeles usan viper (el código nativo de MicroPython), pero QEMU sin KVM mueve la demo 3D a pocos fotogramas por segundo.
 - **Hardware.** Probado en QEMU. Hay drivers para dispositivos reales (AHCI, NVMe, USB xHCI, e1000, RTL8139, virtio, AC'97), pero SnakeyOS no se ha probado en muchos PCs reales.
 - **PyWin** solo ejecuta programas de 64 bits. Los hilos son reales pero se turnan. No hay DirectX, ni red de Windows (`ws2_32`), ni cuadros de diálogo desde recursos. Un programa que calcula sin llamar a Windows retiene el escritorio hasta que lo hace.
+- **Sin C propio**: el kernel es Rust y todo lo demás es Python, también los decodificadores WebP, MP3, AAC y H.264. Solo la VM de MicroPython y QuickJS (hasta que el motor de JavaScript en Python esté listo) son C.
 - **Python** es MicroPython 1.25, no CPython: las extensiones en C (numpy…) no se cargan.
 - **El navegador** dibuja HTML y CSS, pero no ejecuta JavaScript.
 
