@@ -5,7 +5,9 @@
 #
 # Slides with a title and bullet points, in a few colour themes. Click the
 # title or the text of a slide to write in it; "Presentar" shows them full
-# screen (arrows or click to move, Esc to stop). Saved as JSON.
+# screen (arrows or click to move, Esc to stop). Saved like PowerPoint does:
+# .pptx (PowerPoint, LibreOffice Impress and Google Slides open it), and
+# also .pdf (one page per slide) or .json.
 import json
 import pygame
 from desktop import theme as T, ui
@@ -18,7 +20,7 @@ THEMES = [  # background, title colour, text colour, accent
     ((255, 244, 230), (180, 70, 30), (70, 50, 40), (240, 130, 40)),
 ]
 THUMB_W = 150
-DEFAULT = "/disk/Documentos/presentacion.json"
+DEFAULT = "/disk/Documentos/presentacion.pptx"
 
 
 class App(Base):
@@ -28,14 +30,16 @@ class App(Base):
     def __init__(self, win, path=None):
         Base.__init__(self, win)
         self.path = path or DEFAULT
-        self.slides = [{"title": "Mi presentacion", "body": "Hecha en PyOS\nCon Python y pygame"},
+        self.slides = [{"title": "Mi presentacion", "body": "Hecha en SnakeyOS\nCon Python y pygame"},
                        {"title": "Segunda diapositiva", "body": "Primer punto\nSegundo punto"}]
         self.theme = 0
         self.current = 0
         self.editing = "title"          # which part of the slide takes the keys
         self.menu = ui.MenuBar(win.w, [
             ("Archivo", [("Nueva", self.new), ("Abrir...", self.ask_open), ("Guardar", self.save),
-                         ("Guardar como...", self.ask_save)]),
+                         ("Guardar como...", self.ask_save), None,
+                         ("Exportar a PDF", lambda: self.export("pdf")),
+                         ("Exportar a PowerPoint (.pptx)", lambda: self.export("pptx"))]),
             ("Diapositiva", [("Nueva diapositiva", self.add), ("Borrar diapositiva", self.remove),
                              ("Subir", lambda: self.shift(-1)), ("Bajar", lambda: self.shift(1))]),
         ])
@@ -77,25 +81,68 @@ class App(Base):
         self.current, self.path = 0, DEFAULT
 
     def load(self, path):
-        with open(path) as f:
-            data = json.load(f)
-        self.slides = data.get("slides") or self.slides
-        self.theme = data.get("theme", 0) % len(THEMES)
+        from office import files, powerpoint
+        if files.ext(path) == "pptx":
+            slides, background = powerpoint.from_pptx(files.read(path))
+            if background is not None:                  # the theme with the nearest background
+                self.theme = min(range(len(THEMES)),
+                                 key=lambda i: sum((a - b) ** 2 for a, b in zip(THEMES[i][0], background)))
+            self.slides = slides or self.slides
+        else:
+            with open(path) as f:
+                data = json.load(f)
+            self.slides = data.get("slides") or self.slides
+            self.theme = data.get("theme", 0) % len(THEMES)
         self.path = path
         self.current = 0
 
+    def write(self, path):
+        from office import files, powerpoint
+        kind = files.ext(path)
+        if kind == "pptx":
+            data = powerpoint.to_pptx(self.slides, THEMES[self.theme])
+        elif kind == "pdf":
+            data = self.pdf(path.rsplit("/", 1)[-1])
+        else:
+            data = json.dumps({"slides": self.slides, "theme": self.theme})
+        files.write(path, data)
+
+    def pdf(self, title):
+        """One page per slide, drawn as on the screen (16:9)."""
+        from pyos import printing
+        pages = []
+        for slide in self.slides:
+            page = pygame.Surface((1024, 576))
+            self.render(page, pygame.Rect(0, 0, 1024, 576), slide)
+            pages.append(page)
+        return printing.image_pdf(pages, 77, title)          # 1024 px at 77 dpi: 13.3 inches, like PowerPoint
+
     def save(self):
-        import os
         try:
-            os.mkdir(self.path.rsplit("/", 1)[0])
-        except OSError:
-            pass
-        with open(self.path, "w") as f:
-            json.dump({"slides": self.slides, "theme": self.theme}, f)
-        ui.toast("guardado: " + self.path)
+            self.write(self.path)
+            ui.toast("guardado: " + self.path)
+        except OSError as e:
+            ui.toast("no se pudo guardar: %s" % e)
 
     def ask_save(self):
-        ui.ask("Guardar como", "Ruta (.json):", self.path, lambda p: (setattr(self, "path", p), self.save()))
+        def chosen(p):
+            from office import files
+            if files.ext(p) not in ("pptx", "pdf", "json"):
+                p = files.with_ext(p, "pptx")
+            if files.ext(p) == "pdf":
+                return self.export("pdf", p)
+            self.path = p
+            self.save()
+        ui.ask("Guardar como", "Ruta (.pptx, .pdf o .json):", self.path, chosen)
+
+    def export(self, kind, path=None):
+        from office import files
+        path = path or files.with_ext(self.path, kind)
+        try:
+            self.write(path)
+            ui.toast("exportado: " + path)
+        except OSError as e:
+            ui.toast("no se pudo exportar: %s" % e)
 
     def ask_open(self):
         ui.ask("Abrir", "Ruta de la presentacion:", self.path,

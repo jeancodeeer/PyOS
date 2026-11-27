@@ -63,6 +63,12 @@ double tan(double);
 double tanh(double);
 double tgamma(double);
 double trunc(double);
+// in js/shim.c (QuickJS needs them)
+double cbrt(double);
+double hypot(double, double);
+double fmin(double, double);
+double fmax(double, double);
+long lrint(double);
 
 #define nan(tag) __builtin_nan(tag)
 

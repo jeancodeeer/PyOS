@@ -1,5 +1,6 @@
 // MicroPython configuration for PyKernel (bare-metal x86_64).
 #include <stdint.h>
+#include <stddef.h>
 #include <alloca.h>
 
 #define MICROPY_CONFIG_ROM_LEVEL            (MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES)
@@ -8,6 +9,11 @@
 #define MICROPY_ENABLE_COMPILER             (1)
 #define MICROPY_ENABLE_GC                   (1)
 #define MICROPY_GC_SPLIT_HEAP               (1)   // Python can add RAM to the heap
+#define MICROPY_GC_SPLIT_HEAP_AUTO          (1)   // ...and the heap grows by itself from a reserve
+void *mpk_heap_alloc(size_t size);
+void mpk_heap_free(void *ptr);
+#define MP_PLAT_ALLOC_HEAP(size)            mpk_heap_alloc(size)
+#define MP_PLAT_FREE_HEAP(ptr)              mpk_heap_free(ptr)
 #define MICROPY_STACK_CHECK                 (1)
 #define MICROPY_HELPER_REPL                 (1)
 #define MICROPY_REPL_AUTO_INDENT            (1)

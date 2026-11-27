@@ -37,9 +37,10 @@ def init():
 
 def quit():
     """Close the display: back to the text console."""
-    global _surface, _fb
+    global _surface, _fb, _cursor_at
     from pygame import event
     event._detach()
+    _cursor_at = None
     if _fb is not None:
         video.text_mode()
     _surface = _fb = None
@@ -50,9 +51,10 @@ def get_init():
 
 
 def set_mode(size=(0, 0), flags=0, depth=0, display=0, vsync=0):
-    global _surface, _fb
+    global _surface, _fb, _cursor_at
     from pygame import event, mouse
     w, h = int(size[0]) or DEFAULT[0], int(size[1]) or DEFAULT[1]
+    _cursor_at = None
     _fb = video.set_mode(w, h)
     _surface = Surface((w, h))
     _kmouse.bounds = (w, h)
@@ -65,11 +67,11 @@ def set_mode(size=(0, 0), flags=0, depth=0, display=0, vsync=0):
 
 
 def _opengl(surface):
-    """OPENGL: OpenGL draws into the screen (the OpenGL package is PyOS's)."""
+    """OPENGL: OpenGL draws into the screen (the OpenGL package is SnakeyOS's)."""
     try:
         from OpenGL import context
     except ImportError:
-        raise error("OpenGL is not installed (it comes with PyOS)")
+        raise error("OpenGL is not installed (it comes with SnakeyOS)")
     context.attach(surface)
 
 
@@ -81,12 +83,47 @@ def get_active():
     return _surface is not None
 
 
+_cursor_at = None           # where the mouse pointer was last drawn on the screen
+_presenting = False
+
+
 def _present(x, y, w, h):
+    global _cursor_at, _presenting
     if _surface is None or _fb is None:
         raise error("video system not initialized")
-    _gfx.present(_fb.buf, _fb.pitch, _surface._buf, _surface._w, _surface._h, x, y, w, h)
+    _presenting = True
+    try:
+        _gfx.present(_fb.buf, _fb.pitch, _surface._buf, _surface._w, _surface._h, x, y, w, h)
+        from pygame import mouse
+        if _cursor_at is not None and (x, y, w, h) != (0, 0, _surface._w, _surface._h):
+            _restore(*_cursor_at)               # a partial update: rub out the pointer where it was
+        mouse._draw_cursor(_fb)
+        _cursor_at = mouse.get_pos()
+    finally:
+        _presenting = False
+
+
+def _restore(cx, cy):
+    """Put the screen's own pixels back where the pointer was drawn."""
     from pygame import mouse
+    cw, ch = mouse._cursor_size()
+    sw, sh = _surface._w, _surface._h
+    w, h = min(cw, sw - cx), min(ch, sh - cy)
+    if w > 0 and h > 0:
+        _gfx.present(_fb.buf, _fb.pitch, _surface._buf, sw, sh, cx, cy, w, h)
+
+
+def _move_cursor():
+    """The mouse moved: draw the pointer at its new place at once, without waiting for
+    the program to draw a frame (only the two small squares change)."""
+    global _cursor_at
+    if _surface is None or _fb is None or _presenting:
+        return
+    from pygame import mouse
+    if _cursor_at is not None:
+        _restore(*_cursor_at)
     mouse._draw_cursor(_fb)
+    _cursor_at = mouse.get_pos()
 
 
 def flip():

@@ -25,7 +25,8 @@ class Launcher:
         h = rows * CELL_H + 130
         self.rect = pygame.Rect((T.SCREEN[0] - w) // 2, (T.SCREEN[1] - h) // 2 - 10, w, h)
         self.bg = None
-        self.power = [("Apagar", self.poweroff), ("Reiniciar", self.reboot), ("Salir a la consola", self.leave)]
+        self.power = [("Bloquear", self.lock), ("Cerrar sesion", self.log_out), ("Consola", self.leave),
+                      ("Reiniciar", self.reboot), ("Apagar", self.poweroff)]
 
     def items(self):
         q = self.query.lower()
@@ -55,25 +56,25 @@ class Launcher:
             r = self.rect
             self.bg = pygame.Surface((r.w, r.h), SRCALPHA)
             self.bg.fill((0, 0, 0, 0))
-            pygame.draw.rect(self.bg, (24, 26, 36, 235), (0, 0, r.w, r.h), 0, 18)
+            pygame.draw.rect(self.bg, (250, 250, 246, 240), (0, 0, r.w, r.h), 0, 18)
         return self.bg
 
     def draw(self, scr):
         r = self.rect
         scr.blit(self.background(), r.topleft)
         search = pygame.Rect(r.x + 20, r.y + 20, r.w - 40, 34)
-        pygame.draw.rect(scr, (46, 50, 64), search, 0, 10)
+        pygame.draw.rect(scr, (234, 237, 242), search, 0, 10)
         f = ui.font(15)
         ui.text(scr, self.query or "Buscar aplicaciones...", search.x + 14, search.y + 8,
-                T.PANEL_TEXT if self.query else (140, 146, 160), f)
+                T.PANEL_TEXT if self.query else (130, 138, 150), f)
         mouse = self.wm.mouse
         for name, label, cell in self.cells():
             if cell.collidepoint(mouse):
-                pygame.draw.rect(scr, (60, 66, 86), cell.inflate(-6, -6), 0, 12)
+                pygame.draw.rect(scr, (214, 228, 246), cell.inflate(-6, -6), 0, 12)
             scr.blit(icons.icon(apps_icon(name), 52, label), (cell.centerx - 26, cell.y + 10))
             ui.text(scr, label, cell.centerx, cell.y + 70, T.PANEL_TEXT, ui.font(13), CELL_W - 8, center=True)
         for label, fn, pr in self.power_rects():
-            pygame.draw.rect(scr, (70, 76, 96) if pr.collidepoint(mouse) else (46, 50, 64), pr, 0, 8)
+            pygame.draw.rect(scr, (214, 228, 246) if pr.collidepoint(mouse) else (234, 237, 242), pr, 0, 8)
             ui.text(scr, label, pr.centerx, pr.y + 6, T.PANEL_TEXT, ui.font(13), center=True)
 
     def event(self, ev):
@@ -102,6 +103,16 @@ class Launcher:
             for label, fn, pr in self.power_rects():
                 if pr.collidepoint(ev.pos):
                     fn()
+
+    def lock(self):
+        from desktop import splash
+        self.wm.launcher = None
+        splash.lock_screen(self.wm)
+
+    def log_out(self):
+        from desktop import splash
+        self.wm.launcher = None
+        self.wm.later(lambda: splash.log_out(self.wm))   # after this click is handled
 
     def poweroff(self):
         from kernel import acpi

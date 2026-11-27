@@ -214,7 +214,12 @@ _next_port = 49152
 
 
 def ephemeral_port():
+    """A free local port, picked at random (harder to guess for fake replies)."""
     global _next_port
+    for _ in range(64):
+        _next_port = 49152 + _random32() % 16000
+        if _next_port not in udp_ports and not any(c.lport == _next_port for c in tcp_conns.values()):
+            return _next_port
     while True:
         _next_port = 49152 + (_next_port - 49152 + 1) % 16000
         if _next_port not in udp_ports and not any(c.lport == _next_port for c in tcp_conns.values()):
@@ -256,7 +261,7 @@ def _on_udp(src, dst, body):
         return
     sport, dport, length = struct.unpack_from("!HHH", body)
     ep = udp_ports.get(dport)
-    if ep is not None:
+    if ep is not None and len(ep.queue) < UDP_QUEUE:              # a flood must not eat the memory
         ep.queue.append((bytes(body[8:length]), (ntoa(src), sport)))
 
 
@@ -266,15 +271,30 @@ FIN, SYN, RST, PSH, ACK = 0x01, 0x02, 0x04, 0x08, 0x10
 CLOSED, LISTEN, SYN_SENT, SYN_RCVD, ESTABLISHED, FIN_WAIT_1, FIN_WAIT_2, CLOSE_WAIT, CLOSING, LAST_ACK, TIME_WAIT = range(11)
 STATE_NAMES = ("CLOSED", "LISTEN", "SYN_SENT", "SYN_RCVD", "ESTABLISHED", "FIN_WAIT_1", "FIN_WAIT_2",
                "CLOSE_WAIT", "CLOSING", "LAST_ACK", "TIME_WAIT")
-WINDOW = 32768
+WINDOW = 32768            # the most we send without an answer
+RX_MAX = 256 * 1024       # what we can receive without an answer: 256 KiB, with window scaling
+RX_SHIFT = 3              # window scale (RFC 7323): our window field counts 8-byte units
 RTO_MS = 600
+firewall = False          # Settings: refuse connections that come from other machines
+UDP_QUEUE = 64            # datagrams kept per UDP port
+HALF_OPEN = 16            # connections still in SYN_RCVD per listening port (SYN flood)
 
 tcp_conns = {}            # (lport, rip, rport) -> TCPConn
 tcp_listeners = {}        # lport -> TCPListener
 
 
+def _random32():
+    """32 unpredictable bits. Safety: sequence numbers, DNS ids and ports
+    that can be guessed let someone on the network inject fake packets."""
+    try:
+        from crypto import random_bytes
+        return int.from_bytes(random_bytes(4), "big")
+    except Exception:
+        return (time.ticks_us() * 2654435761 + _now()) & 0xFFFFFFFF
+
+
 def _isn():
-    return (time.ticks_us() * 4 + _now()) & 0xFFFFFFFF
+    return _random32()
 
 
 def _seq_lt(a, b):
@@ -295,17 +315,27 @@ class TCPConn:
         self.error = None
         self.ooo = {}                # out-of-order segments: seq -> data
         self.listener = None
+        self.scaled = False          # both sides agreed on window scaling
+        self.peer_shift = 0
         tcp_conns[(lport, rip, rport)] = self
+
+    def _rcv_window(self):
+        room = max(0, (RX_MAX if self.scaled else WINDOW) - len(self.rx))
+        return min(0xFFFF, room >> RX_SHIFT if self.scaled else room)
 
     # -- output --
     def _segment(self, flags, data=b"", seq=None):
         if seq is None:
             seq = self.snd_nxt
         opts = b""
+        window = self._rcv_window()
         if flags & SYN:
             opts = struct.pack("!BBH", 2, 4, MSS)
+            if not flags & ACK or self.scaled:       # window scaling: offered, or answered if offered
+                opts += struct.pack("!BBBB", 1, 3, 3, RX_SHIFT)
+            window = min(0xFFFF, WINDOW)            # a SYN's window is never scaled
         header = struct.pack("!HHIIBBHHH", self.lport, self.rport, seq, self.rcv_nxt if flags & ACK else 0,
-                             (5 + len(opts) // 4) << 4, flags, max(0, WINDOW - len(self.rx)), 0, 0) + opts
+                             (5 + len(opts) // 4) << 4, flags, window, 0, 0) + opts
         seg = header + data
         csum = checksum(seg, _pseudo(ip, self.rip, PROTO_TCP, len(seg)))
         seg = seg[:16] + struct.pack("!H", csum) + seg[18:]
@@ -351,13 +381,25 @@ class TCPConn:
     # -- input --
     def _input(self, seq, ack, flags, wnd, data, opts):
         if flags & RST:
-            self._fail(104 if self.state != SYN_SENT else 111)       # ECONNRESET / ECONNREFUSED
+            # Safety (RFC 5961): only a reset with exactly the next expected
+            # sequence number counts; a near miss gets a "challenge" ACK, the
+            # rest is ignored. Else anyone could cut connections by guessing.
+            if self.state == SYN_SENT:
+                if flags & ACK and ack == self.snd_nxt:
+                    self._fail(111)                                  # ECONNREFUSED
+            elif seq == self.rcv_nxt:
+                self._fail(104)                                      # ECONNRESET
+            elif not _seq_lt(seq, self.rcv_nxt) and _seq_lt(seq, (self.rcv_nxt + RX_MAX) & 0xFFFFFFFF):
+                self._segment(ACK)
             return
         if self.state == SYN_SENT:
             if flags & SYN and flags & ACK and ack == self.snd_nxt:
                 self.rcv_nxt = (seq + 1) & 0xFFFFFFFF
                 self.snd_una = ack
                 self.unacked.clear()
+                shift = _wscale(opts)
+                if shift is not None:
+                    self.scaled, self.peer_shift = True, min(shift, 14)
                 self.snd_wnd = wnd
                 self.state = ESTABLISHED
                 self._segment(ACK)
@@ -374,7 +416,7 @@ class TCPConn:
                 self.unacked = [e for e in self.unacked
                                 if _seq_lt(ack, (e[0] + len(e[2]) + (1 if e[1] & (SYN | FIN) else 0)) & 0xFFFFFFFF)
                                 or ack == e[0]]
-                self.snd_wnd = wnd
+                self.snd_wnd = wnd << self.peer_shift
             if self.state == FIN_WAIT_1 and ack == self.snd_nxt:
                 self.state = FIN_WAIT_2
             elif self.state == CLOSING and ack == self.snd_nxt:
@@ -445,7 +487,7 @@ class TCPConn:
             raise OSError(self.error)
         with _lock:
             chunk = bytes(self.rx[:n])
-            was_full = len(self.rx) > WINDOW // 2
+            was_full = len(self.rx) > (RX_MAX if self.scaled else WINDOW) // 2
             self.rx = self.rx[n:]
             if was_full and self.state in (ESTABLISHED, FIN_WAIT_1, FIN_WAIT_2):
                 self._segment(ACK)                           # window update
@@ -490,6 +532,25 @@ class TCPListener:
         tcp_listeners.pop(self.port, None)
 
 
+def _wscale(opts):
+    """The window scale option (kind 3) in a SYN's options, or None."""
+    i = 0
+    while i < len(opts):
+        kind = opts[i]
+        if kind == 0:
+            break
+        if kind == 1:
+            i += 1
+            continue
+        if i + 1 >= len(opts):
+            break
+        length = opts[i + 1]
+        if kind == 3 and length == 3 and i + 2 < len(opts):
+            return opts[i + 2]
+        i += max(2, length)
+    return None
+
+
 def _on_tcp(src, seg):
     if len(seg) < 20:
         return
@@ -500,11 +561,18 @@ def _on_tcp(src, seg):
     conn = tcp_conns.get((dport, src, sport))
     if conn is None:
         listener = tcp_listeners.get(dport)
-        if listener and flags & SYN and not flags & ACK and len(listener.ready) < listener.backlog:
+        if firewall and listener is not None and src not in (ip, 0x7F000001):
+            listener = None                            # the firewall: as if nobody listened
+        half_open = sum(1 for c in tcp_conns.values() if c.listener is listener and c.state == SYN_RCVD)
+        if listener and flags & SYN and not flags & ACK and len(listener.ready) < listener.backlog \
+                and half_open < HALF_OPEN:
             conn = TCPConn(dport, src, sport)
             conn.listener = listener
             conn.rcv_nxt = (seq + 1) & 0xFFFFFFFF
             conn.snd_wnd = wnd
+            shift = _wscale(opts)
+            if shift is not None:
+                conn.scaled, conn.peer_shift = True, min(shift, 14)
             conn.state = SYN_RCVD
             conn._emit(SYN | ACK)
         elif not flags & RST:                       # nobody here: reset
@@ -683,7 +751,7 @@ def resolve(name, timeout_ms=3000):
         return hit[0]
     if not dns_servers:
         raise OSError(-2, "no DNS server")
-    qid = _isn() & 0xFFFF
+    qid = _random32() & 0xFFFF
     query = struct.pack("!HHHHHH", qid, 0x0100, 1, 0, 0, 0)
     for label in parts:
         query += bytes([len(label)]) + label.encode()
@@ -693,12 +761,17 @@ def resolve(name, timeout_ms=3000):
         for server in dns_servers * 2:
             ep.sendto(query, server, 53)
             try:
-                data, _ = ep.recvfrom(timeout_ms)
+                data, frm = ep.recvfrom(timeout_ms)
             except OSError:
                 continue
-            if struct.unpack_from("!H", data)[0] != qid:
+            # Safety: only the server we asked, with our id and our question
+            if frm != (ntoa(server), 53) or len(data) < 12 or struct.unpack_from("!H", data)[0] != qid \
+                    or data[12:12 + len(query) - 12] != query[12:]:
                 continue
-            answer = _dns_answer(data)
+            try:
+                answer = _dns_answer(data)
+            except Exception:                           # a broken reply
+                continue
             if answer:
                 _dns_cache[name] = (answer[0], _now() + min(answer[1], 3600) * 1000)
                 return answer[0]

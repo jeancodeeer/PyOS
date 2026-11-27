@@ -42,6 +42,11 @@ def _cursor_pixels():
     return _cursor
 
 
+def _cursor_size():
+    buf, w, h = _cursor_pixels()
+    return w, h
+
+
 def _draw_cursor(fb):
     if not (_visible and _m.present):
         return
@@ -66,6 +71,12 @@ def _moved(dx, dy, bits, add, Event):
     pos = (_m.x, _m.y)
     if dx or dy:
         add(Event(C.MOUSEMOTION, pos=pos, rel=(dx, dy), buttons=_buttons_tuple(bits), touch=False))
+        if _visible:
+            try:
+                from pygame import display
+                display._move_cursor()            # the pointer follows the hand, frame or no frame
+            except Exception:
+                pass
     changed = bits ^ _last_buttons
     for bit, button in ((1, C.BUTTON_LEFT), (4, C.BUTTON_MIDDLE), (2, C.BUTTON_RIGHT)):
         if changed & bit:

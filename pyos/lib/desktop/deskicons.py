@@ -8,7 +8,9 @@ from desktop import theme as T, ui, icons, places
 
 CELL_W, CELL_H = 92, 92
 KIND_ICON = {"folder": "folder", "image": "images", "sound": "music", "web": "browser", "app": "about",
-             "python": "editor", "text": "notes", "sheet": "sheet", "exe": "exe"}
+             "python": "editor", "text": "notes", "sheet": "sheet", "exe": "exe", "document": "escritor",
+             "slides": "presentaciones", "pdf": "browser",
+             "video": "videos"}
 
 
 class DesktopIcons:

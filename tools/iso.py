@@ -1,9 +1,9 @@
-"""Make a bootable CD/USB image (GRUB) for running PyOS on a real PC.
+"""Make a bootable CD/USB image (GRUB) for running SnakeyOS on a real PC.
 
-    python tools/iso.py            # -> build/pyos.iso (PyKernel + PyOS)
+    python tools/iso.py            # -> build/snakeyos.iso (PyKernel + SnakeyOS)
     python tools/iso.py --boot     # ...and boot it in QEMU to check
 
-PYKERNEL_ONLY=1 makes build/pykernel.iso, the kernel without PyOS.
+PYKERNEL_ONLY=1 makes build/pykernel.iso, the kernel without SnakeyOS.
 Write the .iso to a USB stick with any image writer (Rufus in
 "DD image" mode, balenaEtcher, dd) and boot it in legacy BIOS / CSM mode.
 """
@@ -18,10 +18,16 @@ sys.path.insert(0, str(ROOT / "tools"))
 import mkfs  # noqa: E402
 from run import host_path, uses_wsl  # noqa: E402
 
-GRUB_CFG = """set timeout=0
+GRUB_CFG = """set timeout=2
+set timeout_style=hidden
 set default=0
 menuentry "%s" {
     multiboot /boot/kernel.bin
+    module /boot/pyfs.img
+    boot
+}
+menuentry "%s (consola de texto)" {
+    multiboot /boot/kernel.bin console
     module /boot/pyfs.img
     boot
 }
@@ -39,9 +45,9 @@ def build_iso() -> Path:
     shutil.copy(kernel, tree / "boot" / "kernel.bin")
     shutil.copy(ROOT / "build" / "pyfs.img", tree / "boot" / "pyfs.img")
     kernel_only = bool(os.environ.get("PYKERNEL_ONLY"))
-    title = "PyKernel" if kernel_only else "PyOS (PyKernel)"
-    (tree / "boot" / "grub" / "grub.cfg").write_text(GRUB_CFG % title, newline="\n")
-    iso = ROOT / "build" / ("pykernel.iso" if kernel_only else "pyos.iso")
+    title = "PyKernel" if kernel_only else "SnakeyOS (PyKernel)"
+    (tree / "boot" / "grub" / "grub.cfg").write_text(GRUB_CFG % (title, title), newline="\n")
+    iso = ROOT / "build" / ("pykernel.iso" if kernel_only else "snakeyos.iso")
     cmd = ["grub-mkrescue", "-o", host_path(iso), host_path(tree)]
     if uses_wsl():
         cmd = ["wsl", "-e"] + cmd

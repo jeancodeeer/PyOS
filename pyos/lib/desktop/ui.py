@@ -13,9 +13,18 @@ from desktop import theme as T
 
 _fonts = {}
 _cache = {}
+SCALE = 1.0                      # Settings > Pantalla > tamano del texto
+
+
+def set_scale(scale):
+    global SCALE
+    SCALE = scale
+    _fonts.clear()
+    _cache.clear()
 
 
 def font(size=13, bold=False, mono=False):
+    size = int(round(size * SCALE))
     key = (size, bold, mono)
     f = _fonts.get(key)
     if f is None:
@@ -34,8 +43,9 @@ def MONO():
     return font(13, mono=True)
 
 
-def render(s, color=T.TEXT, f=None):
+def render(s, color=None, f=None):
     f = f or FONT()
+    color = T.TEXT if color is None else color
     key = (s, color, id(f))
     surf = _cache.get(key)
     if surf is None:
@@ -60,9 +70,10 @@ def fit(s, max_w, f=None):
     return s + "…" if s else ""
 
 
-def text(surf, s, x, y, color=T.TEXT, f=None, max_w=None, center=False):
+def text(surf, s, x, y, color=None, f=None, max_w=None, center=False):
     if not s:
         return 0
+    color = T.TEXT if color is None else color
     f = f or FONT()
     if max_w is not None:
         s = fit(s, max_w, f)
@@ -96,7 +107,9 @@ def box(surf, rect, fill, border=None, radius=6):
         pygame.draw.rect(surf, border, rect, 1, radius)
 
 
-def frame(surf, rect, fill=T.FIELD, border=T.FIELD_BORDER):
+def frame(surf, rect, fill=None, border=None):
+    fill = T.FIELD if fill is None else fill
+    border = T.FIELD_BORDER if border is None else border
     box(surf, rect, fill, border, 6)
 
 
@@ -131,13 +144,13 @@ class Widget:
 
 
 class Label(Widget):
-    def __init__(self, rect, s, color=T.TEXT, f=None):
+    def __init__(self, rect, s, color=None, f=None):
         Widget.__init__(self, rect)
         self.s, self.color, self.f = s, color, f
 
     def draw(self, surf):
         f = self.f or FONT()
-        text(surf, self.s, self.rect.x, self.rect.y + (self.rect.h - f.get_height()) // 2, self.color, f,
+        text(surf, self.s, self.rect.x, self.rect.y + (self.rect.h - f.get_height()) // 2, self.color or T.TEXT, f,
              self.rect.w)
 
 
@@ -327,7 +340,7 @@ class ListBox(Widget):
 class TextView(Widget):
     """Scrolling read-only text (logs, output). mono=True for columns."""
 
-    def __init__(self, rect, lines=(), fg=T.TEXT, bg=T.FIELD, mono=False):
+    def __init__(self, rect, lines=(), fg=None, bg=None, mono=False):
         Widget.__init__(self, rect)
         self.lines = list(lines)
         self.top = 0
@@ -355,13 +368,14 @@ class TextView(Widget):
             self.top = max(0, len(self.lines) - self.rows())
 
     def draw(self, surf):
-        box(surf, self.rect, self.bg, T.FIELD_BORDER if self.bg == T.FIELD else None, 6)
+        bg = self.bg or T.FIELD
+        box(surf, self.rect, bg, T.FIELD_BORDER if self.bg is None else None, 6)
         f, lh = self.f(), self.line_h()
         for i in range(self.rows()):
             j = self.top + i
             if j >= len(self.lines):
                 break
-            text(surf, self.lines[j], self.rect.x + 8, self.rect.y + 4 + i * lh, self.fg, f, self.rect.w - 16)
+            text(surf, self.lines[j], self.rect.x + 8, self.rect.y + 4 + i * lh, self.fg or T.TEXT, f, self.rect.w - 16)
 
     def event(self, ev, pos):
         if ev.type == pygame.MOUSEBUTTONDOWN and inside(self.rect, pos) and ev.button in (4, 5):

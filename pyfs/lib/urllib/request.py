@@ -30,6 +30,16 @@ class Request:
         return self.method
 
 
+def set_proxy(value):
+    """Use a proxy for every web request: "host:port" (None or "" for none)."""
+    if not value:
+        client.PROXY = None
+        return
+    value = value.replace("http://", "").strip("/")
+    host, _, port = value.rpartition(":")
+    client.PROXY = (host or value, int(port) if host else 8080)
+
+
 def urlopen(url, data=None, timeout=30, context=None, max_redirects=8):
     req = url if isinstance(url, Request) else Request(url, data)
     target, method, body = req.full_url, req.method, req.data

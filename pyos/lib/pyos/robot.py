@@ -1,4 +1,4 @@
-# A robot that uses PyOS like a person: it moves the mouse and types on
+# A robot that uses SnakeyOS like a person: it moves the mouse and types on
 # the keyboard through the same path as the real devices (kernel.mouse and
 # kernel.keyboard), so the desktop and the apps cannot tell the difference.
 # The guided tour (pyos/tour.py) and the video are made with it.
@@ -154,7 +154,7 @@ class Robot:
         return False
 
     def launcher(self, label, name=None):
-        """Open the launcher with the PyOS button, search, and click the app
+        """Open the launcher with the SnakeyOS button, search, and click the app
         (the one called `name`, or the first that matches)."""
         self.click(40, 12)
         self.wait(500)

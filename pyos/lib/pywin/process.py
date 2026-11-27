@@ -19,6 +19,7 @@
 import struct
 import _thread
 import _kernel
+import time
 from kernel import mm
 from pywin import cpu, mem, pe, dlls, seh
 from pywin.heap import Heap
@@ -125,6 +126,9 @@ class Console:
         except EOFError:
             return None
 
+    def choose(self, caption, text, options):
+        return 0 if options else None             # no one to ask: the first choice
+
     def popup_menu(self, menu, pos):
         return 0
 
@@ -152,8 +156,7 @@ class Module:
 
 class Process:
     def __init__(self, path, args=(), ui=None, cwd=None):
-        with open(path, "rb") as f:
-            self.image = pe.Image(f.read())
+        self.image = pe.Image(pe.read_file(path))
         self.path = path
         self.cwd = cwd or (path.rsplit("/", 1)[0] or "/")
         self.argv = [to_windows(path)] + [str(a) for a in args]
@@ -167,6 +170,11 @@ class Process:
         self.handlers = {}          # thunk number -> (function, number of arguments, "dll!name")
         self.bound = {}             # (dll, name) -> address given to the program
         self.handles = {}           # Windows handles -> Python objects
+        self.calls = {}             # "dll!function" -> how many times the program called it
+        self.recent = []            # the last Windows functions called (to see where a program is)
+        self.spent = {}             # "dll!function" -> microseconds spent in it (Python side)
+        self.timing = [0, 0, 0, 0]  # microseconds: waiting for the native lock, in native code,
+        #                             sleeping to share the CPU, in _dispatch (all of it)
         self.next_handle = 0x100
         self.last_error = 0
         self.exit_code = None
@@ -193,6 +201,8 @@ class Process:
             for k in range(pages):
                 mm.map_page(base + k * 4096, phys + k * 4096)
         img.load(base)
+        img.data = b""                              # the file's bytes are in place now: free them
+        more_heap(16 << 20 if img.size > (4 << 20) else 4 << 20)   # a big program has a big window tree
         return base, phys, pages
 
     def _load(self):
@@ -226,7 +236,11 @@ class Process:
     def regs(self):
         return self.thread().regs
 
-    def start_thread(self, fn, param, stack_size=0):
+    def start_thread_call(self, fn, args):
+        """Run fn(*args) of the program in a new thread (thread pool work)."""
+        return self.start_thread(fn, None, 0, args)
+
+    def start_thread(self, fn, param, stack_size=0, args=None):
         """CreateThread: run fn(param) of the program in a new thread."""
         t = self.new_thread(stack_size)
 
@@ -234,7 +248,7 @@ class Process:
             self.threads[_thread.get_ident()] = t
             try:
                 self._tls_callbacks(2)                       # DLL_THREAD_ATTACH
-                t.code = self.call(fn, param) & 0xFFFFFFFF
+                t.code = self.call(fn, *(args if args is not None else (param,))) & 0xFFFFFFFF
             except ThreadExit as e:
                 t.code = e.code & 0xFFFFFFFF
             except Exit as e:                                 # ExitProcess from this thread
@@ -294,9 +308,19 @@ class Process:
 
     # ---- DLLs that come with the program ----
     def find_library(self, name):
-        """A .dll file next to the program, in the current folder or in
-        /disk/pywin/system32 (Windows names ignore upper/lower case)."""
+        """A .dll file: where the name says (a full path), else next to the
+        program, in the current folder or in /disk/pywin/system32 (Windows
+        names ignore upper/lower case)."""
         import os
+        if "\\" in name or "/" in name:                     # a path: that very file
+            try:
+                path = self.host_path(name if name.lower().endswith(".dll") else name + ".dll")
+                folder, _, wanted = path.rpartition("/")
+                for entry in os.listdir(folder or "/"):
+                    if entry.lower() == wanted.lower():
+                        return (folder or "") + "/" + entry
+            except OSError:
+                pass
         name = name.replace("\\", "/").rsplit("/", 1)[-1]
         if not name.lower().endswith(".dll"):
             name += ".dll"
@@ -311,14 +335,13 @@ class Process:
 
     def load_library(self, name, init_now=False):
         """Load a DLL file: place it, link it, and (now or at start) call DllMain."""
-        key = dlls.base_name(name)
+        key = dlls.base_name(name.replace("\\", "/").rsplit("/", 1)[-1])
         if key in self.libraries:
             return self.libraries[key]
         path = self.find_library(name)
         if path is None:
             return None
-        with open(path, "rb") as f:
-            img = pe.Image(f.read())
+        img = pe.Image(pe.read_file(path))
         base, phys, pages = self._place(img)
         lib = Module(key, path, img, base, phys, pages)
         self.libraries[key] = lib                        # before its imports: DLLs may need each other
@@ -388,6 +411,7 @@ class Process:
             buf = io.StringIO()
             sys.print_exception(e, buf)
             log.error("pywin: " + buf.getvalue().strip().replace("\n", " | "))
+            _debug(buf.getvalue())
         except Exception:
             pass
 
@@ -403,7 +427,9 @@ class Process:
     def _native(self):
         """Run the program until it calls a thunk; returns that thunk's number."""
         t = self.thread()
+        t0 = time.ticks_us()
         with _native:
+            t1 = time.ticks_us()
             self.code.use(t.regs)
             old = _kernel.rdmsr(GS_BASE)
             _kernel.wrmsr(GS_BASE, t.teb)
@@ -411,11 +437,18 @@ class Process:
                 return _kernel.call(self.code.base)
             finally:
                 _kernel.wrmsr(GS_BASE, old)
+                t2 = time.ticks_us()
+                self.timing[0] += time.ticks_diff(t1, t0)          # waiting for another thread
+                self.timing[1] += time.ticks_diff(t2, t1)          # running the program's own code
 
     def call(self, addr, *args):
         """Call a function inside the program and return what it returns.
         Python can do this at any moment, even while handling a Windows call
-        (callbacks like window procedures or qsort comparisons)."""
+        (callbacks like window procedures or qsort comparisons).
+        Only from one of the program's own threads: each has its registers,
+        and code run from another thread (the desktop's) would overwrite them."""
+        if _thread.get_ident() not in self.threads:
+            raise RuntimeError("PyWin: program code called from a thread that is not the program's")
         s = self.regs
         saved = s.save()
         rsp = (s.get(RSP) - 256) & ~15                       # below whatever is on the stack
@@ -434,7 +467,9 @@ class Process:
                     n = self._native()
                     if n == self._ret:
                         return s.get(RAX)
+                    t0 = time.ticks_us()
                     self._dispatch(n)
+                    self.timing[3] += time.ticks_diff(time.ticks_us(), t0)
                 except seh.Resume as r:          # a C++ catch block in this part of the stack
                     if r.rsp >= frame:
                         raise
@@ -447,12 +482,21 @@ class Process:
             raise Exit(self.exit_request if self.exit_request is not None else 1)
         self._share_cpu()
         fn, nargs, label = self.handlers[n]
+        self.calls[label] = self.calls.get(label, 0) + 1        # for `stats()`: what the program uses most
+        recent = self.recent
+        recent.append(label)
+        if len(recent) > 64:
+            del recent[:32]
         s = self.regs
+        if _trace_on():
+            _debug("%s(%s)" % (label, ", ".join(_show(self.arg(i)) for i in range(min(nargs, 6)))))
+        t0 = time.ticks_us()
         if fn is None:
             self.warn("falta %s (devuelve 0)" % label)
             result = 0
         else:
             result = fn(self, *[self.arg(i) for i in range(nargs)])
+        self.spent[label] = self.spent.get(label, 0) + time.ticks_diff(time.ticks_us(), t0)
         if isinstance(result, float):
             s.set_double(0, result)
             result = 0
@@ -465,8 +509,10 @@ class Process:
         import time
         now = time.ticks_ms()
         if time.ticks_diff(now, self.last_yield) >= 25:
+            t0 = time.ticks_us()
             time.sleep_ms(6)
             self.last_yield = time.ticks_ms()
+            self.timing[2] += time.ticks_diff(time.ticks_us(), t0)
 
     # ---- helpers for the DLLs ----
     def arg(self, i):
@@ -493,6 +539,15 @@ class Process:
         self.handles[h] = obj
         return h
 
+    def stats(self, top=20):
+        """The Windows functions called most, and the last ones: where is the program?"""
+        most = sorted(self.calls.items(), key=lambda kv: -kv[1])[:top]
+        slow = sorted(((k, v // 1000) for k, v in self.spent.items()), key=lambda kv: -kv[1])[:top]
+        return {"most": most, "slow_ms": slow, "last": self.recent[-24:], "total": sum(self.calls.values()),
+                "python_ms": sum(self.spent.values()) // 1000, "lock_wait_ms": self.timing[0] // 1000,
+                "native_ms": self.timing[1] // 1000, "sleep_ms": self.timing[2] // 1000,
+                "dispatch_ms": self.timing[3] // 1000, "threads": len(self.threads)}
+
     def warn(self, text):
         """Say once that something is missing: in the console, or in the system log."""
         if text not in self.warned:
@@ -504,9 +559,16 @@ class Process:
                 pass
             if self.image.console:
                 self.ui.write("PyWin: %s\n" % text)
+            _debug(text)
 
-    def host_path(self, path):
-        return to_host(path, self.cwd)
+    def host_path(self, path, write=False):
+        """The SnakeyOS path for a Windows path, if this program may use it
+        (else OSError 13, "access denied"; see allowed() below)."""
+        host = to_host(path, self.cwd)
+        if not allowed(host, write):
+            self.warn("acceso denegado: %s %s" % ("escribir" if write else "leer", host))
+            raise OSError(13, "acceso denegado: " + host)
+        return host
 
     def close(self):
         if self.code is None:
@@ -529,9 +591,103 @@ class Process:
             mm.free_contiguous(phys, pages)
 
 
-# ---- paths: C:\ is the PyOS disk (/disk), Z:\ is the whole file system ----
+def _show(v):
+    """An argument for the trace: a number, or the text it points to."""
+    if 0x100000 < v < 0x100000000:
+        try:
+            raw = mem.read(v, 64)
+            if raw[1] == 0 and 32 <= raw[0] < 127 and raw[3] == 0:       # UTF-16 text
+                s = mem.wstr(v, 60)
+                if s and all(32 <= ord(c) < 0x3000 for c in s):
+                    return repr(s)
+            if all(32 <= b < 127 for b in raw[:4]):                       # 8-bit text
+                s = mem.cbytes(v, 60)
+                if s and all(32 <= b < 127 for b in s):
+                    return repr(s.decode())
+        except Exception:
+            pass
+    return "%#x" % v
+
+
+def _trace_on():
+    import pywin
+    return getattr(pywin, "DEBUG", 0) == 2
+
+
+def _debug(text):
+    """With pywin.DEBUG on, notes also go out of the serial port (for developers)."""
+    import pywin
+    if getattr(pywin, "DEBUG", False):
+        _kernel.serial_write(("[pywin] %s\n" % text).encode())
+
+
+# ---- paths: C:\ is the SnakeyOS disk (/disk), Z:\ is the whole file system ----
+
+# What a Windows program may touch. It runs with the user's files (C: is
+# /disk) and may read the rest of the system (Z:), but it must not be able to
+# change the system, install Python apps (they run with full power), read
+# the accounts and passwords, or write to a raw disk.
+NO_ACCESS = ("/disk/etc", "/dev")                 # not even to read
+WRITABLE = ("/disk", "/tmp")                      # writing only in here...
+READ_ONLY = ("/disk/apps", "/disk/etc")           # ...but not in these
+DEVICES_OK = ("/dev/null",)
+
+
+def _under(path, folders):
+    return any(path == f or path.startswith(f + "/") for f in folders)
+
+
+def allowed(path, write=False):
+    # the disk (FAT) ignores upper/lower case and Windows drops dots and spaces
+    # at the end of a name, so "/DISK/Etc./passwd" must count as /disk/etc
+    path = "/".join(part.rstrip(". ").lower() if part not in (".", "..") else part for part in path.split("/"))
+    if path in DEVICES_OK:
+        return True
+    if _under(path, NO_ACCESS):
+        return False
+    if write:
+        return _under(path, WRITABLE) and not _under(path, READ_ONLY)
+    return True
+
+
+def more_heap(want):
+    """Make sure `want` bytes are free in the Python heap, moving free RAM
+    into it if needed (big programs need many window pictures and handles).
+    The machine always keeps 96 MiB for drivers and the programs' own memory."""
+    import gc
+    try:
+        from kernel import mm
+    except ImportError:
+        return
+    gc.collect()
+    while gc.mem_free() < want and mm.free_bytes() > (96 << 20):
+        try:
+            if not mm.grow_heap(16):
+                return                     # the heap grows from its reserve by itself
+        except (MemoryError, AttributeError):
+            return
+
+
+def heap_area_for(nbytes):
+    """After a MemoryError: the heap may have enough free bytes in total but
+    no single free piece that big. Add a fresh area of RAM where it fits."""
+    try:
+        from kernel import mm
+        if mm.free_bytes() > (96 << 20):
+            mm.grow_heap(max(16, (2 * nbytes >> 20) + 1), force=True)
+            return True
+    except (ImportError, MemoryError, AttributeError):
+        pass
+    return False
+
 
 def to_host(path, cwd="/"):
+    if path.upper() in ("NUL", "NUL:", "\\\\.\\NUL"):
+        return "/dev/null"
+    if path.startswith("\\\\.\\") or path.startswith("\\\\?\\GLOBALROOT"):
+        return "/dev/" + path[4:].replace("\\", "/")     # a raw Windows device: refused by allowed()
+    if path.startswith("\\\\?\\"):
+        path = path[4:]                                   # long-path prefix: an ordinary path follows
     p = path.replace("\\", "/")
     if len(p) >= 2 and p[1] == ":":
         drive, p = p[0].upper(), p[2:]

@@ -1,15 +1,15 @@
 <div align="center">
 
-<img src="assets/pyos-preview.svg" alt="PyOS, un sistema operativo escrito en Python: escritorio, navegador, 34 apps con pygame, OpenGL y PyWin para ejecutar programas de Windows, incluso DOOM" width="100%">
+<img src="assets/pyos-preview.svg" alt="SnakeyOS, un sistema operativo escrito en Python: escritorio, navegador, 34 apps con pygame, OpenGL y PyWin para ejecutar programas de Windows, incluso DOOM" width="100%">
 
 <br>
 
-# PyOS — un sistema operativo escrito en Python
+# SnakeyOS — un sistema operativo escrito en Python
 
 **Un escritorio, un navegador web, 34 apps, OpenGL y PyWin: archivos `.exe` de Windows ejecutándose de forma nativa, DOOM incluido.**<br>
 Arranca en un PC x86_64 sin nada debajo: ni Linux ni Windows, solo [PyKernel](PYKERNEL.es.md), unos cientos de líneas de Rust que ponen en marcha MicroPython. Todo lo que ves es Python que puedes leer y cambiar.
 
-[![DESCARGAR](https://img.shields.io/badge/DESCARGAR-ISO_%C2%B7_16_MB-000000?style=for-the-badge&labelColor=ffffff)](https://github.com/jeancodeeer/PyOS/releases/latest)
+[![DESCARGAR](https://img.shields.io/badge/DESCARGAR-ISO_%C2%B7_16_MB-000000?style=for-the-badge&labelColor=ffffff)](https://github.com/jeancodeeer/SnakeyOS/releases/latest)
 [![VER](https://img.shields.io/badge/VER-EL_TOUR_DE_9_MIN-ffffff?style=for-the-badge&labelColor=000000)](docs/video/pyos-demo.mp4)
 [![NÚCLEO](https://img.shields.io/badge/N%C3%9ACLEO-PYKERNEL-ffffff?style=for-the-badge&labelColor=000000)](PYKERNEL.es.md)
 [![LICENCIA](https://img.shields.io/badge/LICENCIA-MIT-ffffff?style=for-the-badge&labelColor=000000)](LICENSE)
@@ -25,15 +25,15 @@ Probado en QEMU, no en hardware · MicroPython, no CPython · compatible con pyg
 ```
 
 <p align="center">
-  <img src="docs/screenshots/doom-pywin.gif" alt="DOOM (1993) en PyWin, en el escritorio de PyOS: recorriendo E1M1 y disparando la pistola, junto a la consola de arranque de DOOM" width="80%">
-  <br><sub>DOOM en PyOS. El episodio shareware de Internet Archive, compilado para Windows x64 desde el código GPL de id Software, ejecutado por <b>PyWin</b>: el código máquina del juego corre en el procesador, y cada función de Windows que usa (<code>CreateWindowExA</code>, <code>PeekMessageA</code>, <code>StretchDIBits</code>…) está escrita en Python.</sub>
+  <img src="docs/screenshots/doom-pywin.gif" alt="DOOM (1993) en PyWin, en el escritorio de SnakeyOS: recorriendo E1M1 y disparando la pistola, junto a la consola de arranque de DOOM" width="80%">
+  <br><sub>DOOM en SnakeyOS. El episodio shareware de Internet Archive, compilado para Windows x64 desde el código GPL de id Software, ejecutado por <b>PyWin</b>: el código máquina del juego corre en el procesador, y cada función de Windows que usa (<code>CreateWindowExA</code>, <code>PeekMessageA</code>, <code>StretchDIBits</code>…) está escrita en Python.</sub>
 </p>
 
 <br>
 
 ## 01 — QUÉ ES
 
-Enciendes la máquina. GRUB carga PyKernel, el procesador pasa a 64 bits, arranca un intérprete de Python, y ese intérprete **es** el sistema operativo. PyOS es lo que se usa encima:
+Enciendes la máquina. GRUB carga PyKernel, el procesador pasa a 64 bits, arranca un intérprete de Python, y ese intérprete **es** el sistema operativo. SnakeyOS es lo que se usa encima:
 
 - un **escritorio** con ventanas, dock, lanzador, iconos, menús de clic derecho, carpetas, papelera, inicio de sesión y fondos;
 - **34 apps**, cada una un archivo `.py` que dibuja con pygame: un navegador web con su propio motor HTML/CSS, archivos, terminal, editor de código, música, dibujo, juegos, y las apps de Windows de todos los días hechas de nuevo (Bloc de notas, procesador de textos, hoja de cálculo, presentaciones, Solitario…);
@@ -41,11 +41,11 @@ Enciendes la máquina. GRUB carga PyKernel, el procesador pasa a 64 bits, arranc
 - **PyWin**, un pequeño Wine: carga programas de Windows x64 y los ejecuta, de consola y con ventanas, con hilos, DLL, excepciones de C++, OpenGL… y DOOM.
 
 <p align="center">
-  <img src="docs/screenshots/pyos-launcher.png" alt="El lanzador de PyOS: todas las apps con su icono, un buscador y los botones de apagado, sobre el escritorio" width="48%">
+  <img src="docs/screenshots/pyos-launcher.png" alt="El lanzador de SnakeyOS: todas las apps con su icono, un buscador y los botones de apagado, sobre el escritorio" width="48%">
   <img src="docs/screenshots/pywin-win32-menu.png" alt="Un bloc de notas Win32 escrito en C ejecutándose en PyWin, con su barra de menús leída de los recursos del programa y su ventana Acerca de" width="48%">
   <br>
   <img src="docs/screenshots/opengl-cubo.png" alt="OpenGL por software: un cubo iluminado, esferas sombreadas y un suelo de damero con perspectiva correcta" width="48%">
-  <img src="docs/screenshots/pywin-opengl.png" alt="Un programa OpenGL de Windows (WGL, GL y GLU) dibujando un cubo con luz y una esfera en una ventana de PyOS" width="48%">
+  <img src="docs/screenshots/pywin-opengl.png" alt="Un programa OpenGL de Windows (WGL, GL y GLU) dibujando un cubo con luz y una esfera en una ventana de SnakeyOS" width="48%">
   <br><sub>El lanzador · un programa Win32 con su menú y su diálogo · OpenGL desde Python · OpenGL desde un <code>.exe</code> de Windows.</sub>
 </p>
 
@@ -53,7 +53,7 @@ Enciendes la máquina. GRUB carga PyKernel, el procesador pasa a 64 bits, arranc
 
 ## 01b — PARA QUÉ SIRVE, Y PARA QUÉ NO
 
-Hay sistemas operativos escritos en lenguajes de alto nivel (Singularity en C#, Redox en Rust, las máquinas Lisp). PyOS se pregunta algo más concreto: *¿y si cada capa que ves fuera Python que alguien que empieza pudiera abrir y leer?*
+Hay sistemas operativos escritos en lenguajes de alto nivel (Singularity en C#, Redox en Rust, las máquinas Lisp). SnakeyOS se pregunta algo más concreto: *¿y si cada capa que ves fuera Python que alguien que empieza pudiera abrir y leer?*
 
 | SI QUIERES… | PYOS |
 |---|---|
@@ -65,7 +65,7 @@ Hay sistemas operativos escritos en lenguajes de alto nivel (Singularity en C#, 
 
 **Límites, con honestidad**
 - **Velocidad.** Es Python (MicroPython) de arriba abajo. Los bucles de píxeles usan viper (el código nativo de MicroPython), pero QEMU sin KVM mueve la demo 3D a pocos fotogramas por segundo.
-- **Hardware.** Probado en QEMU. Hay drivers para dispositivos reales (AHCI, NVMe, USB xHCI, e1000, RTL8139, virtio, AC'97), pero PyOS no se ha probado en muchos PCs reales.
+- **Hardware.** Probado en QEMU. Hay drivers para dispositivos reales (AHCI, NVMe, USB xHCI, e1000, RTL8139, virtio, AC'97), pero SnakeyOS no se ha probado en muchos PCs reales.
 - **PyWin** solo ejecuta programas de 64 bits. Los hilos son reales pero se turnan. No hay DirectX, ni red de Windows (`ws2_32`), ni cuadros de diálogo desde recursos. Un programa que calcula sin llamar a Windows retiene el escritorio hasta que lo hace.
 - **Python** es MicroPython 1.25, no CPython: las extensiones en C (numpy…) no se cargan.
 - **El navegador** dibuja HTML y CSS, pero no ejecuta JavaScript.
@@ -74,7 +74,7 @@ Hay sistemas operativos escritos en lenguajes de alto nivel (Singularity en C#, 
 
 | TIENES | HAZ ESTO |
 |---|---|
-| **QEMU** | Descarga `pyos-1.0.iso` de [Releases](https://github.com/jeancodeeer/PyOS/releases/latest), ejecuta `qemu-system-x86_64 -m 768 -cdrom pyos-1.0.iso -nic user,model=virtio-net-pci -device AC97` y escribe `desktop` (o `tour()` para el tour guiado). |
+| **QEMU** | Descarga `pyos-1.0.iso` de [Releases](https://github.com/jeancodeeer/SnakeyOS/releases/latest), ejecuta `qemu-system-x86_64 -m 768 -cdrom pyos-1.0.iso -nic user,model=virtio-net-pci -device AC97` y escribe `desktop` (o `tour()` para el tour guiado). |
 | **Un pendrive** | Graba la ISO con Rufus (modo DD), balenaEtcher o `dd` y arranca en modo BIOS / CSM. |
 | **El código fuente** | `python tools/build.py && python tools/run.py` (ver [Compílalo tú](#07--compílalo-tú)). |
 
@@ -108,21 +108,21 @@ Hay ejemplos con su código C/C++ en [`pyos/share/pywin/ejemplos`](pyos/share/py
 **DOOM**: `python tools/doom.py` compila un `doom.exe` para Windows x64 a partir de [doomgeneric](https://github.com/ozkl/doomgeneric) (el código GPL de id Software) y descarga el episodio shareware de [Internet Archive](https://archive.org/details/DoomsharewareEpisode). Ninguno de los dos archivos se guarda en este repositorio. Después: `PYOS_EXTRA=build/extra python tools/build.py --fs`.
 
 <p align="center">
-  <img src="docs/screenshots/pyos-doom.png" alt="DOOM en E1M1 en el escritorio de PyOS, con la app PyWin y la consola de DOOM detrás" width="70%">
+  <img src="docs/screenshots/pyos-doom.png" alt="DOOM en E1M1 en el escritorio de SnakeyOS, con la app PyWin y la consola de DOOM detrás" width="70%">
 </p>
 
 ## 05 — CÓMO FUNCIONA
 
 ```
  apps (.py, pygame)          Navegador · Archivos · Bloc de notas · DOOM.exe (con PyWin) · ...
- PyOS                        desktop/wm.py · pygame · OpenGL · pywin · navegador     ← pyos/
+ SnakeyOS                        desktop/wm.py · pygame · OpenGL · pywin · navegador     ← pyos/
  PyKernel                    drivers · memoria · hilos · TCP/IP · TLS · FAT · >>>     ← pyfs/
  MicroPython 1.25            + código nativo viper para los bucles de píxeles         ← mpy/
  ~1.200 líneas de Rust       modo largo, interrupciones, la memoria de la VM          ← rust/
  PC x86_64 (o QEMU)
 ```
 
-PyKernel no sabe nada de PyOS: al arrancar ejecuta `/etc/init.d/*.py`, y [`pyos/etc/init.d/50-pyos.py`](pyos/etc/init.d/50-pyos.py) añade los comandos `desktop`, `tour`, `browse`, `apps` e `install_app`. `tools/mkfs.py` superpone los dos árboles en la imagen de arranque; con `PYKERNEL_ONLY=1` se deja fuera PyOS.
+PyKernel no sabe nada de SnakeyOS: al arrancar ejecuta `/etc/init.d/*.py`, y [`pyos/etc/init.d/50-pyos.py`](pyos/etc/init.d/50-pyos.py) añade los comandos `desktop`, `tour`, `browse`, `apps` e `install_app`. `tools/mkfs.py` superpone los dos árboles en la imagen de arranque; con `PYKERNEL_ONLY=1` se deja fuera SnakeyOS.
 
 ## 06 — EL TOUR Y EL VÍDEO
 
@@ -135,11 +135,11 @@ PyKernel no sabe nada de PyOS: al arrancar ejecuta `/etc/init.d/*.py`, y [`pyos/
 Necesitas Python 3, Rust (`rustup target add x86_64-unknown-none`, `rustup component add llvm-tools`), gcc y make para la VM de MicroPython, QEMU para ejecutarlo, y `grub-pc-bin xorriso mtools` para la ISO.
 
 ```bash
-git clone --recursive https://github.com/jeancodeeer/PyOS
-cd PyOS
+git clone --recursive https://github.com/jeancodeeer/SnakeyOS
+cd SnakeyOS
 python tools/build.py          # VM de MicroPython + núcleo en Rust + imagen de arranque
 python tools/run.py            # arrancar en QEMU
-python tools/iso.py            # build/pyos.iso
+python tools/iso.py            # build/snakeyos.iso
 python tools/test.py           # pruebas del núcleo (89)
 python tools/test_desktop.py   # escritorio y apps (16)
 python tools/test_pywin.py     # PyWin y OpenGL (13)

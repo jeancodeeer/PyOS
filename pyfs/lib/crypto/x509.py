@@ -108,7 +108,8 @@ class Certificate:
             n = n.lower()
             if n == host:
                 return True
-            if n.startswith("*.") and "." in host and host.split(".", 1)[1] == n[2:]:
+            # "*.example.com" matches "www.example.com" (one label), never "com" level names
+            if n.startswith("*.") and n.count(".") >= 2 and "." in host and host.split(".", 1)[1] == n[2:]:
                 return True
         return False
 
@@ -274,4 +275,8 @@ def verify_chain(chain, host, now=None, extra=None):
             break
         if chain[i + 1].subject_raw != cert.issuer_raw or not cert.verify_signed_by(chain[i + 1]):
             raise ValueError("broken chain at " + repr(cert))
+        # Safety: only a CA may sign other certificates; else anyone with an
+        # ordinary certificate could make one for any site with it
+        if not chain[i + 1].is_ca:
+            raise ValueError("%r signed a certificate but is not a CA" % chain[i + 1])
     raise ValueError("no trusted root for " + repr(chain[-1]))

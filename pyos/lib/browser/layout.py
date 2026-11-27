@@ -23,8 +23,10 @@ class Item:
 def hidden(st):
     """Elements pages hide on purpose: off-screen, clipped, or 1px boxes
     with overflow hidden (screen-reader-only text)."""
-    if st.get("display") == "none" or st.get("visibility") == "hidden" and st.get("position") in ("absolute", "fixed"):
+    if st.get("display") == "none":
         return True
+    # visibility: hidden / opacity: 0 on ordinary content is often a page waiting for its
+    # scripts to show it ("anti-flicker"): only floating things (menus, pop-ups) stay hidden
     pos = st.get("position")
     if pos in ("absolute", "fixed"):
         for side in ("left", "top", "right"):
@@ -32,6 +34,12 @@ def hidden(st):
             if isinstance(v, str) and v.startswith("-") and v[1:2].isdigit() and len(v) > 4:
                 return True
         if st.get("clip") or st.get("clip-path"):
+            return True
+        tr = st.get("transform", "")
+        if isinstance(tr, str) and ("translatex(-100%" in tr or "translatex(100%" in tr or "translate(-100%" in tr
+                                    or "translate(100%" in tr or "translatey(-100%" in tr or "scale(0)" in tr):
+            return True                                  # a drawer or menu waiting off screen
+        if st.get("opacity") in ("0", "0.0") or st.get("visibility") == "hidden":
             return True
         w, h = st.get("width"), st.get("height")
         if (w in (0, 1) or h in (0, 1)) and st.get("overflow") == "hidden":
@@ -113,6 +121,7 @@ class Layout:
         self.height = 0
         self.max_x = width
         self.bg = None
+        self.owner = {}                      # id(style) -> its element: which element a word belongs to
 
     def run(self, root):
         body = root.find("body") or root
@@ -166,6 +175,9 @@ class Layout:
         bg_index = len(self.items)
         if node.tag == "a" and node.attrs.get("href"):
             href = self.page.resolve(node.attrs["href"])
+        if node.tag == "summary" and node.parent is not None and node.parent.tag == "details":
+            href = "pyos-toggle:%d" % id(node.parent)        # a click opens or closes the <details>
+            self.page.toggles[id(node.parent)] = node.parent
         cy = by + bt + pt
         if disp == "table":
             h = self.table(node, content_x, cy, content_w, href)
@@ -174,9 +186,10 @@ class Layout:
         elif node.tag == "hr":
             self.items.append(Item("hr", content_x, cy + 4, content_w, 2, color=st.get("border-color", (160, 160, 160))))
             h = 10
-        elif disp in ("flex", "inline-flex") and st.get("flex-direction", "row") in ("row", "row-reverse") \
-                and st.get("flex-wrap") != "wrap":
+        elif disp in ("flex", "inline-flex") and st.get("flex-direction", "row") in ("row", "row-reverse"):
             h = self.flex_row(node, content_x, cy, content_w, href)
+        elif disp in ("grid", "inline-grid"):
+            h = self.grid(node, content_x, cy, content_w, href)
         else:
             h = self.flow(node, content_x, cy, content_w, href)
         min_h = st.get("height")
@@ -196,6 +209,8 @@ class Layout:
         kind = st.get("list-style-type", "disc")
         if kind == "none":
             return None
+        if kind.startswith("disclosure"):
+            return "\u25be" if node.parent is not None and "open" in node.parent.attrs else "\u25b8"
         if kind in ("decimal", "lower-alpha", "upper-alpha", "lower-roman", "upper-roman"):
             n = 1
             parent = node.parent
@@ -233,14 +248,14 @@ class Layout:
                 run.clear()
 
         for child in node.children:
-            if child.tag is None:
-                run.append((child, href))
+            if child.tag is None or child.tag == "svg":
+                run.append((child, href))               # text, and pictures drawn from SVG, flow in lines
                 continue
             cst = child.style or {}
             d = cst.get("display", "inline")
             if d == "none":
                 continue
-            if d in ("block", "list-item", "table", "flex", "grid", "table-row-group", "table-row") or \
+            if d in ("block", "list-item", "table", "flex", "grid", "table-row-group", "table-row", "flow-root") or \
                     child.tag in ("hr",) or (cst.get("float") in ("left", "right") and d != "inline" and False):
                 flush()
                 if marker is not None:
@@ -271,6 +286,7 @@ class Layout:
             if node.tag is None:
                 parent = node.parent
                 st = parent.style if parent is not None and parent.style else css.ROOT_STYLE
+                self.owner[id(st)] = parent
                 text = node.text
                 tt = st.get("text-transform")
                 if tt == "uppercase":
@@ -302,13 +318,16 @@ class Layout:
             if node.tag == "br":
                 out.append(("br",))
                 continue
-            if node.tag == "img":
+            if node.tag in ("img", "svg"):
                 out.append(("image", node, href))
                 continue
-            if node.tag in ("input", "button", "select", "textarea"):
+            if node.tag == "button" and _styled_button(st) and not node.attrs.get("type") == "submit" \
+                    and self.page.form_of(node) is None:
+                pass                                        # styled by the page: drawn as its content
+            elif node.tag in ("input", "button", "select", "textarea"):
                 out.append(("widget", node, href))
                 continue
-            if node.tag in ("svg", "video", "canvas", "iframe", "object"):
+            if node.tag in ("video", "canvas", "iframe", "object"):
                 continue
             h2 = href
             if node.tag == "a" and node.attrs.get("href"):
@@ -316,7 +335,7 @@ class Layout:
             ident = node.attrs.get("id")
             if ident:
                 out.append(("anchor", ident))
-            if d in ("block", "list-item", "table", "flex"):
+            if d in ("block", "list-item", "table", "flex", "grid", "flow-root"):
                 out.append(("block", node, h2))
                 continue
             for c in reversed(node.children):
@@ -418,18 +437,52 @@ class Layout:
                 color = st.get("color", (0, 0, 0))
                 deco = st.get("text-decoration", "none")
                 bold = st.get("font-weight") == "bold"
-                self.items.append(Item("text", cx, base, iw, ih, data, color, href,
+                self.items.append(Item("text", cx, base, iw, ih, data, color, href, node=self.owner.get(id(st)),
                                        extra=(font_for(st), bold, "underline" in deco, "line-through" in deco,
                                               st.get("background-color") if isinstance(st.get("background-color"), tuple) else None)))
             elif kind == "image":
-                self.items.append(Item("image", cx, base, iw, ih, self.page.resolve(data.attrs.get("src", "")), None, href,
+                key = ("svg:%d" % id(data)) if data.tag == "svg" else self.page.resolve(data.attrs.get("src", ""))
+                self.items.append(Item("image", cx, base, iw, ih, key, None, href,
                                        node=data, extra=data.attrs.get("alt", "")))
             elif kind == "widget":
                 self.items.append(Item("widget", cx, y + (lh - ih) // 2, iw, ih, None, None, href, node=data))
                 cx += 4
             cx += iw
 
+    def _svg_size(self, node, avail):
+        """An <svg> in the page: its CSS size, or width/height (1em is the text's size), or its viewBox."""
+        st = node.style or {}
+        fs = st.get("font-size", 16)
+        w = st.get("width") if isinstance(st.get("width"), int) else None
+        h = st.get("height") if isinstance(st.get("height"), int) else None
+        if isinstance(st.get("width"), tuple):
+            w = int(st["width"][1] * avail / 100)
+        from imaging import svg
+        iw, ih = svg.intrinsic_size(node, (0, 0))
+        for name in ("width", "height"):
+            v = node.attrs.get(name, "")
+            if v and not v.replace(".", "", 1).isdigit():
+                px = css.length(v, fs, avail)
+                if isinstance(px, int) and px > 0:
+                    if name == "width":
+                        iw = px
+                    else:
+                        ih = px
+        if not iw or not ih:
+            iw, ih = iw or fs, ih or fs
+        if w and not h:
+            h = ih * w // max(1, iw)
+        elif h and not w:
+            w = iw * h // max(1, ih)
+        elif not w:
+            w, h = iw, ih
+        if w > avail:
+            h, w = h * avail // max(1, w), avail
+        return max(1, min(w, 1600)), max(1, min(h, 1600))
+
     def _image_size(self, node, avail):
+        if node.tag == "svg":
+            return self._svg_size(node, avail)
         st = node.style or {}
         src = self.page.resolve(node.attrs.get("src", ""))
         surf = self.images.get(src)
@@ -480,31 +533,168 @@ class Layout:
 
     # ---- flex rows (approximation) ----
     def flex_row(self, node, x, y, w, href):
-        kids = [c for c in node.children if c.tag and (c.style or {}).get("display") != "none"]
+        """A flex row: sizes from flex-basis / width / the content, then the free
+        room shared by flex-grow (or taken back by flex-shrink), justify-content,
+        wrapping onto more lines with flex-wrap. Too narrow: one under another."""
+        st = node.style
+        kids = [c for c in node.children if c.tag and (c.style or {}).get("display") != "none" and not hidden(c.style or {})
+                and (c.style or {}).get("position") not in ("absolute", "fixed")]
         text_kids = [c for c in node.children if c.tag is None and c.text.strip()]
-        if not kids or len(kids) > 8 or text_kids:
+        if not kids or text_kids:
             return self.flow(node, x, y, w, href)
-        gap = _px(node.style, "gap", 8)
-        fixed = []
+        gap = _px(st, "column-gap", 0)
+        row_gap = _px(st, "row-gap", 0)
+        wrap = st.get("flex-wrap", "nowrap") in ("wrap", "wrap-reverse")
+        items = []
         for c in kids:
-            cw = _resolve_width(c.style or {}, w)
-            fixed.append(cw)
-        free = w - sum(f for f in fixed if f) - gap * (len(kids) - 1)
-        flexible = [i for i, f in enumerate(fixed) if not f]
-        each = max(40, free // max(1, len(flexible))) if flexible else 0
-        cx, tallest = x, 0
-        for i, c in enumerate(kids):
-            cw = fixed[i] or each
-            saved = (c.style or {}).get("width")
+            cs = c.style or {}
+            basis = cs.get("flex-basis")
+            if isinstance(basis, tuple):
+                basis = int(basis[1] * w / 100)
+            if not isinstance(basis, int) or (basis == 0 and cs.get("flex-basis") != 0 and False):
+                basis = None
+            if basis is None or (basis == 0 and _num(cs.get("flex-grow")) == 0):
+                basis = _resolve_width(cs, w)
+            if basis is None:
+                basis = min(w, self.preferred_width(c, w))
+            mn = cs.get("min-width")
+            if isinstance(mn, int) and basis < mn:
+                basis = mn
+            items.append([c, max(0, basis), _num(cs.get("flex-grow"), 0), _num(cs.get("flex-shrink"), 1)])
+        # lines
+        lines, line, used = [], [], 0
+        for it in items:
+            if wrap and line and used + gap + it[1] > w:
+                lines.append(line)
+                line, used = [], 0
+            used += (gap if line else 0) + it[1]
+            line.append(it)
+        if line:
+            lines.append(line)
+        justify = st.get("justify-content", "flex-start")
+        cy, total = y, 0
+        for li, line in enumerate(lines):
+            sizes = [it[1] for it in line]
+            free = w - sum(sizes) - gap * (len(line) - 1)
+            grow = sum(it[2] for it in line)
+            if free > 0 and grow:
+                sizes = [s + int(free * it[2] / grow) for s, it in zip(sizes, line)]
+                free = 0
+            elif free < 0:
+                weight = sum(s * it[3] for s, it in zip(sizes, line)) or 1
+                sizes = [max(24, s + int(free * s * it[3] / weight)) for s, it in zip(sizes, line)]
+                free = max(0, w - sum(sizes) - gap * (len(line) - 1))
+            if len(line) > 1 and min(sizes) < 60 and not wrap:
+                h = 0                                      # far too narrow side by side: stack them
+                for it in line:
+                    h += self.block(it[0], x, cy + h, w, href)
+                cy += h + row_gap
+                continue
+            cx, between = x, gap
+            if justify in ("center",):
+                cx += free // 2
+            elif justify in ("flex-end", "end", "right"):
+                cx += free
+            elif justify == "space-between" and len(line) > 1:
+                between = gap + free // (len(line) - 1)
+            elif justify in ("space-around", "space-evenly"):
+                pad = free // (len(line) * 2 if justify == "space-around" else len(line) + 1)
+                cx += pad
+                between = gap + (2 * pad if justify == "space-around" else pad)
+            order = list(zip(sizes, line))
+            if st.get("flex-direction") == "row-reverse":
+                order.reverse()
+            tallest = 0
+            for cw, it in order:
+                c = it[0]
+                saved = c.style.get("width")
+                c.style["width"] = cw
+                h = self.block(c, cx, cy, cw, href)
+                if saved is None:
+                    del c.style["width"]
+                else:
+                    c.style["width"] = saved
+                tallest = max(tallest, h)
+                cx += cw + between
+            cy += tallest + (row_gap if li + 1 < len(lines) else 0)
+        return cy - y
+
+    def grid(self, node, x, y, w, href):
+        """A grid: the columns from grid-template-columns (px, fr, %, auto,
+        repeat(), minmax()); the children fill the cells row by row."""
+        st = node.style
+        kids = [c for c in node.children if c.tag and (c.style or {}).get("display") != "none" and not hidden(c.style or {})
+                and (c.style or {}).get("position") not in ("absolute", "fixed")]
+        if not kids or any(c.tag is None and c.text.strip() for c in node.children):
+            return self.flow(node, x, y, w, href)
+        gap = _px(st, "column-gap", 0)
+        row_gap = _px(st, "row-gap", 0)
+        cols = _tracks(st.get("grid-template-columns", ""), w, gap)
+        if len(cols) <= 1:
+            h = 0                                          # one column: one under another
+            for c in kids:
+                h += self.block(c, x, y + h, w, href) + (row_gap if c is not kids[-1] else 0)
+            return h
+        n = len(cols)
+        cy, col, tallest = y, 0, 0
+        for c in kids:
+            span = _span_cols(c.style or {}, n)
+            if col + span > n:
+                cy += tallest + row_gap
+                col, tallest = 0, 0
+            cx = x + sum(cols[:col]) + gap * col
+            cw = sum(cols[col:col + span]) + gap * (span - 1)
+            saved = c.style.get("width")
             c.style["width"] = cw
-            h = self.block(c, cx, y, cw, href)
+            h = self.block(c, cx, cy, cw, href)
             if saved is None:
                 del c.style["width"]
             else:
                 c.style["width"] = saved
             tallest = max(tallest, h)
-            cx += cw + gap
-        return tallest
+            col += span
+            if col >= n:
+                cy += tallest + row_gap
+                col, tallest = 0, 0
+        return cy + tallest - y
+
+    def preferred_width(self, node, limit):
+        """About how wide node would like to be (its content on one line), at most limit."""
+        total, best = 0, 0
+        stack = [(node, 0)]
+        budget = 400                                       # big subtrees: a rough guess is enough
+        while stack and budget:
+            n, _ = stack.pop()
+            budget -= 1
+            if n.tag is None:
+                st = n.parent.style if n.parent is not None and n.parent.style else {}
+                total += int(len(" ".join(n.text.split())) * st.get("font-size", 16) * 0.55)
+                continue
+            st = n.style or {}
+            if st.get("display") == "none" or hidden(st):
+                continue
+            fixed = _resolve_width(st, limit)
+            if fixed:
+                total += fixed
+                continue
+            if n.tag == "img":
+                try:
+                    total += int(n.attrs.get("width", "0").rstrip("px") or 0) or 24
+                except ValueError:
+                    total += 24
+                continue
+            if n.tag in ("input", "button", "select", "textarea"):
+                total += 120
+            if n.tag == "svg":
+                total += 24
+                continue
+            total += _px(st, "padding-left") + _px(st, "padding-right")
+            for c in reversed(n.children):
+                stack.append((c, 0))
+            if total > limit:
+                return limit
+        best = max(best, total)
+        return max(16, min(limit, best + 4))
 
     # ---- tables ----
     def table(self, node, x, y, w, href):
@@ -587,6 +777,83 @@ class Layout:
                     self.items.append(Item("border", cx, cy, cw, row_h, color=(160, 160, 160), extra=(1, 1, 1, 1)))
             cy += row_h + spacing
         return cy - y
+
+
+def _styled_button(st):
+    """A <button> the page restyles (its own background, no border, appearance: none):
+    it reads as text or an icon, not as a grey system button."""
+    return (st.get("appearance") == "none" or st.get("-webkit-appearance") == "none" or
+            "background-color" in st or st.get("border-top-width") == 0)
+
+
+def _num(v, default=0.0):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _tracks(text, w, gap):
+    """grid-template-columns -> column widths in pixels."""
+    from browser.css import tokens, length
+    text = (text or "").strip()
+    if not text or text == "none":
+        return [w]
+    words = []
+    for t in tokens(text):
+        if t.startswith("repeat(") and t.endswith(")"):
+            inner = tokens(t[7:-1])
+            count, what = inner[0], inner[1:]
+            if count in ("auto-fill", "auto-fit"):
+                least = what[0]
+                if least.startswith("minmax("):
+                    least = tokens(least[7:-1])[0]
+                m = length(least, 16, w)
+                m = m if isinstance(m, int) and m > 0 else 200
+                k = max(1, (w + gap) // (m + gap))
+            else:
+                try:
+                    k = int(count)
+                except ValueError:
+                    k = 1
+            words += what * min(k, 24)
+        elif t.startswith("["):
+            continue                                   # line names
+        else:
+            words.append(t)
+    fixed, fr = [], []
+    for t in words:
+        if t.startswith("minmax("):
+            lo, hi = (tokens(t[7:-1]) + ["1fr"])[:2]
+            t = hi if hi.endswith("fr") else lo
+        if t.endswith("fr"):
+            fixed.append(None)
+            fr.append(_num(t[:-2], 1))
+        elif t in ("auto", "min-content", "max-content") or t.startswith("fit-content"):
+            fixed.append(None)
+            fr.append(1.0)
+        else:
+            v = length(t, 16, w)
+            fixed.append(v if isinstance(v, int) else None)
+            fr.append(0.0 if isinstance(v, int) else 1.0)
+    free = w - sum(f for f in fixed if f) - gap * (len(words) - 1)
+    share = sum(fr) or 1
+    out = [f if f else max(16, int(free * r / share)) for f, r in zip(fixed, fr)]
+    return out or [w]
+
+
+def _span_cols(st, n):
+    v = st.get("grid-column", "")
+    if not v:
+        return 1
+    if "span" in v:
+        try:
+            return max(1, min(n, int(v.split("span")[1].split("/")[0].split()[0])))
+        except (ValueError, IndexError):
+            return 1
+    if "-1" in v.split("/")[-1:] or v.replace(" ", "") in ("1/-1",):
+        return n
+    return 1
 
 
 def _span(cell):

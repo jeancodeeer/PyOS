@@ -135,8 +135,8 @@ def glGetError():
 
 
 def glGetString(name):
-    return {GL_VENDOR: b"PyOS", GL_RENDERER: b"PyOS software rasterizer (Python + viper)",
-            GL_VERSION: b"1.5 PyOS", GL_EXTENSIONS: b""}.get(name, b"")
+    return {GL_VENDOR: b"SnakeyOS", GL_RENDERER: b"SnakeyOS software rasterizer (Python + viper)",
+            GL_VERSION: b"1.5 SnakeyOS", GL_EXTENSIONS: b""}.get(name, b"")
 
 
 def glHint(target, mode):

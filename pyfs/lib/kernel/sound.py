@@ -5,7 +5,7 @@
 #   sound.play(pcm_bytes, rate=22050, channels=1, bits=16)
 #   sound.stop();  sound.volume(60);  sound.busy()
 #
-# The card (ac97.py) plays a ring of small buffers by itself. A timer
+# The card (ac97.py or hda.py) plays a ring of small buffers by itself. A timer
 # callback keeps the buffers it has already played filled with what comes
 # next, so long sounds stream without holding up Python.
 import struct
@@ -21,13 +21,17 @@ _next = 0                   # the next ring slot to fill
 
 
 def init():
+    """Find a sound card: AC'97 or Intel HD Audio (both play a ring of buffers)."""
     global card
-    from kernel import ac97
-    try:
-        card = ac97.probe()
-    except Exception as e:
-        log.warn("sound: %r" % e)
-        card = None
+    from kernel import ac97, hda
+    card = None
+    for driver in (ac97, hda):
+        try:
+            card = driver.probe()
+        except Exception as e:
+            log.warn("sound: %s: %r" % (driver.__name__, e))
+        if card:
+            break
     if card:
         timer.subscribe(_on_tick)
         log.info("sound: %s at %d Hz" % (card.name, card.rate))
@@ -66,6 +70,14 @@ def _widen(src: ptr8, n: int, dst: ptr8, channels: int, bits: int):
         o += 4
 
 
+@micropython.viper
+def _stretch(src: ptr32, n: int, dst: ptr32, out_n: int, rate: int, target: int):
+    k = 0
+    while k < out_n:
+        dst[k] = src[k * rate // target]
+        k += 1
+
+
 def _resample(data, rate):
     """Nearest-neighbour rate change of 16-bit stereo samples (frames of 4 bytes)."""
     target = card.rate
@@ -74,10 +86,7 @@ def _resample(data, rate):
     frames = len(data) // 4
     out_frames = frames * target // rate
     out = bytearray(out_frames * 4)
-    mv = memoryview(data)
-    for k in range(out_frames):
-        j = (k * rate // target) * 4
-        out[k * 4:k * 4 + 4] = mv[j:j + 4]
+    _stretch(data, frames, out, out_frames, rate, target)
     return out
 
 
@@ -97,13 +106,67 @@ def play(data, rate=48000, channels=2, bits=16):
     return True
 
 
+# ---- streaming: players add sound bit by bit (a video, a long song) ----
+
+_stream = {"rate": 0, "fed": 0, "on": False, "ending": False}   # the stream a player is feeding
+
+
+def stream_begin(rate=44100):
+    """Start a new stream (a song, a video, or after jumping in it)."""
+    stop()
+    _stream["rate"] = card.set_rate(rate) if card else rate
+    _stream["fed"] = 0
+    _stream["on"] = True
+    _stream["ending"] = False
+
+
+def stream_end():
+    """No more sound will come: play what is queued, even a last part-filled buffer."""
+    _stream["ending"] = True
+    if card is not None and not _playing and _queue:
+        _start()
+
+
+def feed(data, rate=44100, channels=2, bits=16):
+    """Add PCM samples after what is already queued (does not stop the sound).
+    The card only gets whole buffers, so no silence slips in between pieces."""
+    global _queue
+    if card is None or not data:
+        return False
+    if not _stream["on"]:
+        stream_begin(rate)
+    frames = len(data) // (channels * bits // 8)
+    pcm = bytearray(frames * 4)
+    _widen(data, frames, pcm, channels, bits)
+    if _stream["rate"] != rate:
+        pcm = _resample(pcm, rate)
+    _stream["fed"] += len(pcm) // 4
+    _queue += pcm
+    if not _playing and len(_queue) >= 4 * card.BUF_BYTES:     # a little ahead before starting
+        _start()
+    return True
+
+
+def queued_seconds():
+    """Sound handed in but not heard yet (in the queue and in the card's ring)."""
+    if card is None or not _playing:
+        return len(_queue) / 4.0 / max(1, _stream["rate"] or 44100)
+    ahead = (_next - card.current()) % card.BUFFERS
+    return (len(_queue) + ahead * card.BUF_BYTES) / 4.0 / (_stream["rate"] or 44100)
+
+
+def stream_position():
+    """Seconds of the stream already heard (the clock of a video player)."""
+    rate = _stream["rate"] or 44100
+    return max(0.0, _stream["fed"] / float(rate) - queued_seconds())
+
+
 def _start():
     global _playing, _next, _filled
-    from kernel import ac97
     card.stop()
     _next = 0
     _filled = 0
-    for _ in range(ac97.BUFFERS - 1):            # fill the whole ring before starting
+    for _ in range(card.BUFFERS - 1):            # fill the whole ring before starting
         if not _fill_one():
             break
     if _filled:
@@ -115,16 +178,17 @@ def _start():
 def _fill_one():
     """Copy the next piece of the queue into the next ring slot."""
     global _queue, _next, _filled
-    from kernel import ac97
     if not _queue:
         return False
-    chunk = _queue[:ac97.BUF_BYTES]
-    _queue = _queue[ac97.BUF_BYTES:]
+    if _stream["on"] and not _stream["ending"] and len(_queue) < card.BUF_BYTES:
+        return False                                 # wait for a whole buffer
+    chunk = _queue[:card.BUF_BYTES]
+    _queue = _queue[card.BUF_BYTES:]
     buf = card.bufs[_next]
     buf[:len(chunk)] = chunk
-    if len(chunk) < ac97.BUF_BYTES:
-        buf[len(chunk):] = bytes(ac97.BUF_BYTES - len(chunk))
-    _next = (_next + 1) % ac97.BUFFERS
+    if len(chunk) < card.BUF_BYTES:
+        buf[len(chunk):] = bytes(card.BUF_BYTES - len(chunk))
+    _next = (_next + 1) % card.BUFFERS
     _filled += 1
     return True
 
@@ -134,21 +198,25 @@ def _on_tick():
     global _playing
     if not _playing or card is None:
         return
-    from kernel import ac97
     cur = card.current()
-    ahead = (_next - cur) % ac97.BUFFERS
-    while _queue and ahead < ac97.BUFFERS - 2:
-        _fill_one()
+    ahead = (_next - cur) % card.BUFFERS
+    while _queue and ahead < card.BUFFERS - 2:
+        if not _fill_one():                      # a stream waiting for a whole buffer
+            break
         card.set_last(_next - 1)
         ahead += 1
-    if not _queue and not card.running():
-        _playing = False
+    if not card.running():
+        if _queue and (len(_queue) >= card.BUF_BYTES or _stream["ending"] or not _stream["on"]):
+            _start()                             # the card ran dry while sound was coming: go on
+        elif not _queue:
+            _playing = False
 
 
 def stop():
     global _queue, _playing
     _queue = bytearray()
     _playing = False
+    _stream["on"] = False
     if card:
         card.stop()
 

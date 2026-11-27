@@ -1,5 +1,6 @@
-# ECDSA signature verification on the NIST curves P-256 and P-384, with
-# points in Jacobian coordinates and Python's big integers.
+# ECDSA signature verification on the NIST curves P-256 and P-384, and
+# ECDH key exchange on P-256 (for TLS servers that do not offer X25519),
+# with points in Jacobian coordinates and Python's big integers.
 from crypto import bit_length
 
 CURVES = {
@@ -104,3 +105,31 @@ def verify(curve, public, digest, r, s):
     if not R[2]:
         return False
     return _affine(R, c)[0] % n == r
+
+
+def on_curve(curve, x, y):
+    c = CURVES[curve]
+    p = c["p"]
+    return 0 <= x < p and 0 <= y < p and (y * y - (x * x * x - 3 * x + c["b"])) % p == 0
+
+
+def ecdh_keypair(random_bytes, curve="P-256"):
+    """(private number, public point as 04 || x || y)."""
+    c = CURVES[curve]
+    n, size = c["n"], c["size"]
+    while True:
+        d = int.from_bytes(random_bytes(size), "big")
+        if 0 < d < n:
+            break
+    x, y = _affine(_mul2(d, (c["gx"], c["gy"], 1), 0, (c["gx"], c["gy"], 1), c), c)
+    return d, b"\x04" + x.to_bytes(size, "big") + y.to_bytes(size, "big")
+
+
+def ecdh_shared(private, peer, curve="P-256"):
+    """The shared secret (the x coordinate) with the other side's public point."""
+    c = CURVES[curve]
+    x, y = decode_point(curve, peer)
+    if not on_curve(curve, x, y):
+        raise ValueError("the peer's point is not on the curve")
+    sx, _ = _affine(_mul2(private, (x, y, 1), 0, (x, y, 1), c), c)
+    return sx.to_bytes(c["size"], "big")

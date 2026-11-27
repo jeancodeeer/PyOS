@@ -145,7 +145,7 @@ def _open(p, name, mode):
     m = mode.replace("t", "").replace("b", "").replace("c", "").replace("n", "")
     m = {"r": "rb", "w": "wb", "a": "ab", "r+": "r+b", "w+": "w+b", "a+": "a+b"}.get(m, "rb")
     try:
-        f = open(p.host_path(name), m)
+        f = open(p.host_path(name, write=m != "rb"), m)
     except OSError:
         p.state["errno"] = 2
         return 0
@@ -370,7 +370,7 @@ def _write(p, fd, buf, n):
 def remove(p, name):
     import os
     try:
-        os.remove(p.host_path(mem.cstr(name)))
+        os.remove(p.host_path(mem.cstr(name), write=True))
         return 0
     except OSError:
         return -1
@@ -383,7 +383,7 @@ dll.alias("_unlink", "remove")
 def rename(p, old, new):
     import os
     try:
-        os.rename(p.host_path(mem.cstr(old)), p.host_path(mem.cstr(new)))
+        os.rename(p.host_path(mem.cstr(old), write=True), p.host_path(mem.cstr(new), write=True))
         return 0
     except OSError:
         return -1
@@ -1533,7 +1533,7 @@ def _endthread(p):
 def _mkdir(p, name):
     import os
     try:
-        os.mkdir(p.host_path(mem.cstr(name)))
+        os.mkdir(p.host_path(mem.cstr(name), write=True))
         return 0
     except OSError:
         p.state["errno"] = 17                           # EEXIST
@@ -1544,7 +1544,7 @@ def _mkdir(p, name):
 def _rmdir(p, name):
     import os
     try:
-        os.rmdir(p.host_path(mem.cstr(name)))
+        os.rmdir(p.host_path(mem.cstr(name), write=True))
         return 0
     except OSError:
         return -1

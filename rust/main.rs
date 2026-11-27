@@ -32,7 +32,7 @@ extern "C" {
 
 // ---- boot information, readable from Python via _kernel.info() ----
 
-const INFO_LEN: usize = 12;
+const INFO_LEN: usize = 13;
 static INFO: [AtomicU64; INFO_LEN] = [const { AtomicU64::new(0) }; INFO_LEN];
 const I_KSTART: usize = 0;
 const I_KEND: usize = 1;
@@ -45,6 +45,8 @@ const I_STACK_BASE: usize = 7;
 const I_STACK_TOP: usize = 8;
 const I_IDT: usize = 9;
 const I_BOOTS: usize = 10;
+const I_POOL_START: usize = 11;
+const I_POOL_END: usize = 12;
 
 #[no_mangle]
 pub extern "C" fn rk_info(i: u32) -> u64 {
@@ -91,8 +93,9 @@ unsafe fn rd64(a: u64) -> u64 {
     core::ptr::read_unaligned(a as *const u64)
 }
 
-const GIB4: u64 = 1 << 32;
-const HEAP_MAX: u64 = 32 << 20;
+const MAPPED: u64 = 64 << 30;              // identity-mapped by boot.rs
+const HEAP_FIRST: u64 = 48 << 20;          // the Python heap to start with...
+const KEEP_FREE: u64 = 192 << 20;          // ...and RAM always left for drivers, DMA and programs
 
 /// Record the boot archive (module 0) and choose the Python heap: a slice of
 /// the largest usable RAM region above the kernel image. The rest of RAM is
@@ -114,37 +117,72 @@ unsafe fn scan_multiboot(magic: u32, mbi: u64) {
             floor = floor.max(rd32(mods + i * 16 + 4) as u64);
         }
     }
-    let (mut best_start, mut best_end) = (0u64, 0u64);
+    // The largest usable region gets the Python heap; the largest one left
+    // (or the rest of the same one) becomes the heap's reserve, which
+    // MicroPython takes more heap from by itself when it runs short
+    // (mpy/modkernel.c, MICROPY_GC_SPLIT_HEAP_AUTO). The rest of RAM is for
+    // kernel/mm.py: drivers, DMA buffers and Windows programs.
+    let mut regions: [(u64, u64); 32] = [(0, 0); 32];
+    let mut n = 0;
+    let mut total = 0u64;
     if flags & (1 << 6) != 0 {
         let mut p = rd32(mbi + 48) as u64;
         let end = p + rd32(mbi + 44) as u64;
-        while p < end {
+        while p < end && n < 32 {
             let size = rd32(p) as u64;
             if rd32(p + 20) == 1 {
                 let s = rd64(p + 4).max(floor);
-                let e = (rd64(p + 4) + rd64(p + 12)).min(GIB4);
-                if e > s && e - s > best_end - best_start {
-                    best_start = s;
-                    best_end = e;
+                let e = (rd64(p + 4) + rd64(p + 12)).min(MAPPED);
+                if e > s {
+                    regions[n] = (s, e);
+                    n += 1;
+                    total += e - s;
                 }
             }
             p += size + 4;
         }
     } else if flags & 1 != 0 {
-        best_start = floor;
-        best_end = (1 << 20) + ((rd32(mbi + 8) as u64) << 10);
+        regions[0] = (floor, (1 << 20) + ((rd32(mbi + 8) as u64) << 10));
+        n = 1;
+        total = regions[0].1 - regions[0].0;
     }
-    if best_end <= best_start {
+    if n == 0 {
         klog!("boot: no usable memory map; assuming 64 MiB of RAM");
-        best_start = floor;
-        best_end = 64 << 20;
+        set_heap(floor, 64 << 20);
+        return;
     }
-    set_heap(best_start, best_end);
+    // the heap: in the largest region below 4 GiB (where most RAM of small machines is)
+    let mut h = 0;
+    for i in 0..n {
+        let (s, e) = regions[i];
+        let (hs, he) = regions[h];
+        if s < (1 << 32) && (e - s > he - hs || hs >= (1 << 32)) {
+            h = i;
+        }
+    }
+    set_heap(regions[h].0, regions[h].1);
+    let heap_end = INFO[I_HEAP_END].load(Relaxed);
+    regions[h].0 = heap_end;
+    // the reserve: half of the RAM, from the largest region (above 4 GiB if there is one)
+    let mut r = 0;
+    for i in 0..n {
+        if regions[i].1 - regions[i].0 > regions[r].1 - regions[r].0 {
+            r = i;
+        }
+    }
+    let (rs, re) = regions[r];
+    let room = if re - rs > KEEP_FREE && rs < (1 << 32) { re - rs - KEEP_FREE } else { re - rs };
+    let want = (total / 2).min(room) & !0xFFFFF;
+    if want >= (16 << 20) {
+        let start = (re - want) & !0xFFF;               // its top end: low memory stays for DMA
+        INFO[I_POOL_START].store(start, Relaxed);
+        INFO[I_POOL_END].store(re & !0xFFF, Relaxed);
+    }
 }
 
 fn set_heap(region_start: u64, region_end: u64) {
     let start = (region_start + 0xFFF) & !0xFFF;
-    let len = ((region_end - start) / 4).min(HEAP_MAX) & !0xFFF;
+    let len = ((region_end - start) / 4).min(HEAP_FIRST) & !0xFFF;
     INFO[I_HEAP_START].store(start, Relaxed);
     INFO[I_HEAP_END].store(start + len, Relaxed);
 }

@@ -6,7 +6,7 @@ from desktop.wm import App
 
 
 class About(App):
-    title = "Acerca de PyOS"
+    title = "Acerca de SnakeyOS"
     size = (500, 330)
     resizable = False
 
@@ -16,7 +16,7 @@ class About(App):
         from kernel import shell, mm
         surf.fill(T.WIN_BG)
         surf.blit(logo.surface(110), (24, 24))
-        ui.text(surf, "PyOS %s" % pyos.VERSION, 156, 34, T.TEXT, ui.font(24, bold=True))
+        ui.text(surf, "SnakeyOS %s" % pyos.version(), 156, 34, T.TEXT, ui.font(24, bold=True))
         ui.text(surf, "Un sistema operativo hecho en Python", 156, 68, T.MUTED, ui.font(15))
         rows = ["Nucleo: PyKernel %s (Rust + MicroPython)" % pyos.kernel_version(),
                 "Escritorio, apps y navegador: Python y pygame",
@@ -25,27 +25,3 @@ class About(App):
                 "El codigo esta en /lib, /apps y /etc: abrelo con Archivos."]
         for i, r in enumerate(rows):
             ui.text(surf, r, 24, 156 + 24 * i, T.TEXT, max_w=self.win.w - 40)
-
-
-class JeanCodeLauncher(App):
-    title = "JeanCode"
-    size = (360, 120)
-
-    def __init__(self, win):
-        App.__init__(self, win)
-        self.form = ui.Form()
-        self.form.add(ui.Button((20, 60, 150, 28), "Abrir JeanCode", self.go, primary=True))
-
-    def go(self):
-        from desktop import wm
-        wm.wm.running = False
-        wm.wm.after = "jeancode"
-
-    def draw(self, surf):
-        surf.fill(T.WIN_BG)
-        ui.text(surf, "JeanCode ocupa toda la pantalla: el escritorio", 12, 10, T.TEXT)
-        ui.text(surf, "se cierra y vuelve con desktop() al salir.", 12, 28, T.TEXT)
-        self.form.draw(surf)
-
-    def event(self, ev, pos):
-        return self.form.event(ev, pos)

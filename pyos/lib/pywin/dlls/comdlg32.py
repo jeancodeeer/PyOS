@@ -1,4 +1,4 @@
-# comdlg32.dll: the "Open" and "Save as" dialogs. PyOS asks for the file
+# comdlg32.dll: the "Open" and "Save as" dialogs. SnakeyOS asks for the file
 # with its own dialog (or, at the text console, on the keyboard).
 from pywin import mem
 from pywin.dlls import Dll
@@ -56,3 +56,42 @@ def CommDlgExtendedError(p):
 @dll(1)
 def ChooseColorA(p, cc):
     return 0                                    # "cancelled": the program keeps its colour
+
+
+# ---- printing: choose the printer, get a DC to draw the pages on ----
+
+PD_RETURNDC, PD_RETURNDEFAULT = 0x100, 0x400
+
+
+@dll(1)
+def PrintDlgW(p, pd):
+    from pywin.dlls import g32_extra
+    names = g32_extra.printer_names()
+    flags = mem.u32(pd + 40)
+    if flags & PD_RETURNDEFAULT:
+        choice = 0
+    else:
+        choice = p.ui.choose("Imprimir", "¿En qué impresora?", names) if hasattr(p.ui, "choose") else 0
+    if choice is None:
+        return 0                                             # cancelled
+    if flags & PD_RETURNDC:
+        mem.put64(pd + 32, g32_extra.create_printer_dc(p, names[choice]))
+    mem.put64(pd + 16, 0)                                    # no DEVMODE / DEVNAMES of ours
+    mem.put64(pd + 24, 0)
+    mem.put16(pd + 52, 1)                                    # one copy
+    return 1
+
+
+@dll(1)
+def PageSetupDlgW(p, psd):
+    return 0
+
+
+@dll(1)
+def ChooseColorW(p, cc):
+    return 0                                    # "cancelled": the program keeps its colour
+
+
+@dll(1)
+def ChooseFontW(p, cf):
+    return 0

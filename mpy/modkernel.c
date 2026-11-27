@@ -388,6 +388,7 @@ static mp_obj_t k_info(void) {
         MP_QSTR_kernel_start, MP_QSTR_kernel_end, MP_QSTR_heap_start, MP_QSTR_heap_end,
         MP_QSTR_multiboot, MP_QSTR_initrd_start, MP_QSTR_initrd_end,
         MP_QSTR_stack_base, MP_QSTR_stack_top, MP_QSTR_idt, MP_QSTR_boots,
+        MP_QSTR_pool_start, MP_QSTR_pool_end,
     };
     mp_obj_t d = mp_obj_new_dict(MP_ARRAY_SIZE(names));
     for (size_t i = 0; i < MP_ARRAY_SIZE(names); i++) {
@@ -396,6 +397,102 @@ static mp_obj_t k_info(void) {
     return d;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(k_info_obj, k_info);
+// ---- the heap's reserve ----
+// rust/main.rs sets aside a big piece of RAM at boot (info "pool_start" ..
+// "pool_end"). When the Python heap is full, MicroPython itself asks for
+// more (MICROPY_GC_SPLIT_HEAP_AUTO): mpk_heap_alloc() hands out a piece of
+// the reserve, and mpk_heap_free() takes back a piece the heap emptied.
+#define POOL_SLOTS 64
+static uintptr_t free_at[POOL_SLOTS], free_len[POOL_SLOTS];   // free pieces of the reserve
+static uintptr_t used_at[POOL_SLOTS], used_len[POOL_SLOTS];   // pieces lent to the heap
+static int n_free = -1, n_used = 0;
+
+static void pool_init(void) {
+    n_free = 0;
+    uintptr_t s = rk_info(11), e = rk_info(12);
+    if (e > s) {
+        free_at[0] = s;
+        free_len[0] = e - s;
+        n_free = 1;
+    }
+}
+
+void *mpk_heap_alloc(size_t size) {
+    if (n_free < 0) {
+        pool_init();
+    }
+    size = (size + 4095) & ~(size_t)4095;
+    if (n_used >= POOL_SLOTS) {
+        return NULL;
+    }
+    for (int i = 0; i < n_free; i++) {
+        if (free_len[i] >= size) {
+            uintptr_t p = free_at[i];
+            free_at[i] += size;
+            free_len[i] -= size;
+            used_at[n_used] = p;
+            used_len[n_used++] = size;
+            return (void *)p;
+        }
+    }
+    return NULL;
+}
+
+void mpk_heap_free(void *ptr) {
+    uintptr_t p = (uintptr_t)ptr;
+    for (int i = 0; i < n_used; i++) {
+        if (used_at[i] == p) {
+            uintptr_t len = used_len[i];
+            used_at[i] = used_at[n_used - 1];
+            used_len[i] = used_len[--n_used];
+            for (int k = 0; k < n_free; k++) {          // join a free neighbour
+                if (free_at[k] + free_len[k] == p) {
+                    free_len[k] += len;
+                    return;
+                }
+                if (p + len == free_at[k]) {
+                    free_at[k] = p;
+                    free_len[k] += len;
+                    return;
+                }
+            }
+            if (n_free < POOL_SLOTS) {
+                free_at[n_free] = p;
+                free_len[n_free++] = len;
+            }
+            return;
+        }
+    }
+    // not from the reserve (added with heap_add): it stays with kernel/mm.py
+}
+
+size_t gc_get_max_new_split(void) {
+    if (n_free < 0) {
+        pool_init();
+    }
+    size_t best = 0;
+    for (int i = 0; i < n_free; i++) {
+        if (free_len[i] > best) {
+            best = free_len[i];
+        }
+    }
+    return best;
+}
+
+// heap_pool() -> (reserve size, free in it): for memory statistics.
+static mp_obj_t k_heap_pool(void) {
+    if (n_free < 0) {
+        pool_init();
+    }
+    uintptr_t free = 0;
+    for (int i = 0; i < n_free; i++) {
+        free += free_len[i];
+    }
+    mp_obj_t t[2] = { NEW_U64(rk_info(12) - rk_info(11)), NEW_U64(free) };
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(k_heap_pool_obj, k_heap_pool);
+
 // heap_add(addr, size): give the Python heap another block of RAM.
 static mp_obj_t k_heap_add(mp_obj_t addr, mp_obj_t size) {
     uintptr_t a = U64(addr);
@@ -450,6 +547,7 @@ static const mp_rom_map_elem_t kernel_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_serial_write), MP_ROM_PTR(&k_serial_write_obj) },
     { MP_ROM_QSTR(MP_QSTR_info), MP_ROM_PTR(&k_info_obj) },
     { MP_ROM_QSTR(MP_QSTR_heap_add), MP_ROM_PTR(&k_heap_add_obj) },
+    { MP_ROM_QSTR(MP_QSTR_heap_pool), MP_ROM_PTR(&k_heap_pool_obj) },
 };
 static MP_DEFINE_CONST_DICT(kernel_globals, kernel_globals_table);
 

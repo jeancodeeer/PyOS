@@ -19,6 +19,8 @@ GLOB_CNT = 0x2C
 
 class AC97:
     name = "AC97"
+    BUFFERS = BUFFERS
+    BUF_BYTES = BUF_BYTES
 
     def __init__(self, bus, dev, fn):
         pci.write32(bus, dev, fn, 0x04, pci.read32(bus, dev, fn, 0x04) | 0x5)   # I/O + bus master

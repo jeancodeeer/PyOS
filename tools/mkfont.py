@@ -19,7 +19,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "pyos" / "share" / "fonts"            # the fonts belong to PyOS
+OUT = ROOT / "pyos" / "share" / "fonts"            # the fonts belong to SnakeyOS
 DEJAVU = Path("/usr/share/fonts/truetype/dejavu")
 
 FONTS = {                              # name -> TrueType file

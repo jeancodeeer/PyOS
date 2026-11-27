@@ -1,5 +1,5 @@
 //! Machine bring-up: Multiboot entry in 32-bit protected mode, identity-map
-//! the first 4 GiB with 2 MiB pages, enable SSE, switch to long mode, call
+//! the first 64 GiB with 2 MiB pages (all the RAM of most machines), enable SSE, switch to long mode, call
 //! `kmain`. Also the common interrupt entry path. Nothing else lives in asm.
 
 use core::arch::global_asm;
@@ -32,19 +32,18 @@ _start:
     rep stosl
     movl $boot_stack_top, %esp
 
-    /* PML4[0] -> PDPT, PDPT[0..4] -> 4 page directories of 2 MiB pages */
+    /* PML4[0] -> PDPT, PDPT[0..64] -> 64 page directories of 2 MiB pages */
     movl $boot_pdpt, %eax
     orl $3, %eax
     movl %eax, boot_pml4
     movl $boot_pd, %eax
     orl $3, %eax
-    movl %eax, boot_pdpt
+    xorl %ecx, %ecx
+3:  movl %eax, boot_pdpt(,%ecx,8)
     addl $0x1000, %eax
-    movl %eax, boot_pdpt+8
-    addl $0x1000, %eax
-    movl %eax, boot_pdpt+16
-    addl $0x1000, %eax
-    movl %eax, boot_pdpt+24
+    incl %ecx
+    cmpl $64, %ecx
+    jne 3b
     xorl %ecx, %ecx
 1:  movl %ecx, %eax
     shll $21, %eax
@@ -54,7 +53,7 @@ _start:
     shrl $11, %eax
     movl %eax, boot_pd+4(,%ecx,8)
     incl %ecx
-    cmpl $2048, %ecx
+    cmpl $32768, %ecx                   /* 64 GiB / 2 MiB               */
     jne 1b
 
     movl %cr4, %eax
@@ -104,7 +103,7 @@ boot_gdt_ptr:
 .global boot_pml4
 boot_pml4:  .skip 4096
 boot_pdpt:  .skip 4096
-boot_pd:    .skip 16384
+boot_pd:    .skip 262144                    /* 64 page directories */
 .global boot_stack
 boot_stack: .skip 0x80000
 .global boot_stack_top

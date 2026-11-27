@@ -46,7 +46,7 @@ class ConsoleIn:
 
 
 class HostFile:
-    """A file of the PyOS file system, opened by a Windows program."""
+    """A file of the SnakeyOS file system, opened by a Windows program."""
 
     def __init__(self, path, mode):
         self.f = open(path, mode)
@@ -241,7 +241,7 @@ def GetModuleFileNameW(p, module, buf, size):
     return len(name)
 
 
-@dll(3)
+@dll(1)
 def DisableThreadLibraryCalls(p, module):
     return 1
 
@@ -254,6 +254,21 @@ def FindResourceA(p, module, name, kind):
     if not found:
         return 0
     return p.new_handle(found)
+
+
+@dll(3)
+def FindResourceW(p, module, name, kind):
+    def key(v):
+        return v if v < 0x10000 else mem.wstr(v)
+    found = p.resource(module or p.base, key(kind), key(name))
+    if not found:
+        return 0
+    return p.new_handle(found)
+
+
+@dll(4)
+def FindResourceExW(p, module, kind, name, language):
+    return FindResourceW(p, module, name, kind)            # the same, with kind before name
 
 
 @dll(2)
@@ -1202,8 +1217,14 @@ def _create(p, name, access, disposition):
         return std(p, STD_OUTPUT)
     if name.upper() == "CONIN$":
         return std(p, STD_INPUT)
-    path = p.host_path(name)
-    write = bool(access & 0x40000000)
+    # GENERIC_WRITE, GENERIC_ALL, FILE_WRITE_DATA, FILE_APPEND_DATA, DELETE; or a disposition that creates
+    write = bool(access & 0x50010006) or disposition in (1, 2, 4, 5)
+    try:
+        path = p.host_path(name, write=write)
+    except OSError:
+        p.last_error = 5                                   # ERROR_ACCESS_DENIED
+        return INVALID
+    write = bool(access & 0x50010006)
     exists = _exists(path)
     # 1 CREATE_NEW, 2 CREATE_ALWAYS, 3 OPEN_EXISTING, 4 OPEN_ALWAYS, 5 TRUNCATE_EXISTING
     if disposition in (3, 5) and not exists or disposition == 1 and exists:
@@ -1259,7 +1280,7 @@ def SetFilePointerEx(p, h, distance, out, method):
 def DeleteFileA(p, name):
     import os
     try:
-        os.remove(p.host_path(mem.cstr(name)))
+        os.remove(p.host_path(mem.cstr(name), write=True))
         return 1
     except OSError:
         p.last_error = ERROR_FILE_NOT_FOUND
@@ -1270,7 +1291,7 @@ def DeleteFileA(p, name):
 def CreateDirectoryA(p, name, security):
     import os
     try:
-        os.mkdir(p.host_path(mem.cstr(name)))
+        os.mkdir(p.host_path(mem.cstr(name), write=True))
         return 1
     except OSError:
         return 0
@@ -1311,30 +1332,54 @@ def GetTempPathA(p, size, buf):
 
 # ---- text conversion ----
 
+def _utf16(text):
+    return mem.to_utf16(text)
+
+
+ERROR_INSUFFICIENT_BUFFER = 122
+
+
 @dll(6)
 def MultiByteToWideChar(p, cp, flags, src, n, dst, size):
-    data = mem.cbytes(src) + b"\0" if _i32(n) == -1 else mem.read(src, n)
-    text = _text(data)
+    n, size = _i32(n), _i32(size)                  # int arguments: only the low 32 bits count
+    if n == 0 or size < 0 or n < -1:
+        p.last_error = 87                          # ERROR_INVALID_PARAMETER
+        return 0
+    data = mem.cbytes(src) + b"\0" if n == -1 else mem.read(src, n)
+    wide = _utf16(_text(data))
+    chars = len(wide) // 2
     if size:
-        text = text[:size]
-        mem.write(dst, b"".join(bytes((ord(c) & 255, (ord(c) >> 8) & 255)) for c in text))
-    return len(text)
+        if chars > size:                           # like Windows: fail, never cut the text
+            p.last_error = ERROR_INSUFFICIENT_BUFFER
+            return 0
+        mem.write(dst, wide)
+    return chars
 
 
 @dll(8)
 def WideCharToMultiByte(p, cp, flags, src, n, dst, size, default, used):
-    if _i32(n) == -1:
+    n, size = _i32(n), _i32(size)
+    if n == 0 or size < 0 or n < -1:
+        p.last_error = 87
+        return 0
+    if n == -1:
         text = mem.wstr(src) + "\0"
     else:
         raw = mem.read(src, n * 2)
-        text = "".join(chr(raw[2 * k] | raw[2 * k + 1] << 8) for k in range(n))
+        text = _from_utf16(raw)
     data = text.encode()
     if size:
-        data = data[:size]
+        if len(data) > size:
+            p.last_error = ERROR_INSUFFICIENT_BUFFER
+            return 0
         mem.write(dst, data)
     if used:
         mem.put32(used, 0)
     return len(data)
+
+
+def _from_utf16(raw):
+    return mem._from_utf16(raw)
 
 
 @dll(1)
@@ -1434,3 +1479,7 @@ def FormatMessageA(p, flags, source, msg_id, lang, buf, size, args):
 
 
 
+
+
+# ---- the rest of kernel32, in files of their own ----
+from pywin.dlls import k32_files, k32_text, k32_misc    # noqa: E402,F401

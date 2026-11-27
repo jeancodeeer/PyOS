@@ -41,7 +41,8 @@ def _obj(p, h):
 STOCK = {0: ("brush", (255, 255, 255)), 1: ("brush", (192, 192, 192)), 2: ("brush", (128, 128, 128)),
          3: ("brush", (64, 64, 64)), 4: ("brush", (0, 0, 0)), 5: ("brush", None), 6: ("pen", (255, 255, 255)),
          7: ("pen", (0, 0, 0)), 8: ("pen", None), 10: ("font", 16), 12: ("font", 16), 13: ("font", 16),
-         14: ("font", 16), 16: ("font", 16), 17: ("font", 14), 18: ("brush", (220, 220, 220))}
+         14: ("font", 16), 16: ("font", 16), 17: ("font", 14), 18: ("brush", (220, 220, 220)),
+         19: ("pen", (0, 0, 0))}
 
 
 @dll(1)
@@ -150,13 +151,35 @@ def CreateBitmap(p, w, h, planes, bits, data):
     return new_object(p, gui.Bitmap(_i32(w), _i32(h)))
 
 
+SAVED = ("pen", "brush", "font", "text_color", "bk_color", "transparent", "align", "clip")
+
+
 @dll(1)
 def SaveDC(p, h):
-    return 1
+    """Remember the DC's pen, brush, font, colours and clip; RestoreDC brings them back."""
+    dc = _dc(p, h)
+    if dc is None:
+        return 0
+    if not hasattr(dc, "saved"):
+        dc.saved = []
+    dc.saved.append({k: getattr(dc, k, None) for k in SAVED})
+    return len(dc.saved)
 
 
 @dll(2)
 def RestoreDC(p, h, n):
+    dc = _dc(p, h)
+    saved = getattr(dc, "saved", None) if dc else None
+    if not saved:
+        return 0
+    n = _i32(n)
+    keep = len(saved) + n if n < 0 else n - 1          # -1 means the last one saved
+    if not 0 <= keep < len(saved):
+        return 0
+    state = saved[keep]
+    del saved[keep:]
+    for k, v in state.items():
+        setattr(dc, k, v)
     return 1
 
 
@@ -340,7 +363,11 @@ def FillRect(p, h, rect, brush):
     dc = _dc(p, h)
     color = brush_color(p, brush)
     if dc and color is not None:
-        dc.surface.fill(color, _read_rect(rect))
+        if getattr(dc, "clip", None) is not None:
+            from pywin.dlls.g32_extra import clipped_fill
+            clipped_fill(dc, color, _read_rect(rect))
+        else:
+            dc.surface.fill(color, _read_rect(rect))
         dc.changed()
     return 1
 
@@ -451,7 +478,11 @@ def _text_out(dc, x, y, text):
         x -= img.get_width()
     if dc.align & 8:                            # TA_BOTTOM
         y -= img.get_height()
-    dc.surface.blit(img, (x, y))
+    if getattr(dc, "clip", None) is not None:
+        from pywin.dlls.g32_extra import clipped_blit
+        clipped_blit(dc, img, x, y)
+    else:
+        dc.surface.blit(img, (x, y))
     dc.changed()
 
 
@@ -702,3 +733,7 @@ def DescribePixelFormat(p, h, n, size, pfd):
 def SwapBuffers(p, h):
     from pywin.dlls import opengl32
     return opengl32.swap(p, h)
+
+
+from pywin.dlls import g32_extra                 # noqa: E402  (the rest of gdi32)
+from pywin.dlls.g32_extra import dll_msimg32     # noqa: E402,F401

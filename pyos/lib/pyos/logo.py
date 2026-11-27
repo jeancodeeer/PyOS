@@ -1,4 +1,5 @@
-# The PyOS logo: a snake whose body is the cross of a four-pane window.
+# The SnakeyOS logo: a blue and yellow snake shaped as an S (pictures in /share/pyos/logo-N.png;
+# draw() is the drawn fallback).
 #
 #   logo.draw(surface, x, y, size)      draw it in a size x size square
 #   logo.surface(size)                  a transparent Surface with it
@@ -60,13 +61,30 @@ def draw(surf, x, y, size):
 
 
 _cache = {}
+SIZES = (20, 24, 32, 48, 64, 96, 128, 256)     # /share/pyos/logo-N.png: the SnakeyOS logo, drawn
+
+
+def _picture(size):
+    """The logo picture for `size`: the stored one of that size, or the next bigger one scaled."""
+    best = next((n for n in SIZES if n >= size), SIZES[-1])
+    for root in ("/disk/system/share", "/share"):
+        try:
+            img = pygame.image.load("%s/pyos/logo-%d.png" % (root, best))
+            if best != size:
+                img = pygame.transform.scale(img, (size, size))
+            return img
+        except Exception:
+            pass
+    return None
 
 
 def surface(size):
     s = _cache.get(size)
     if s is None:
-        s = pygame.Surface((size, size), SRCALPHA)
-        s.fill((0, 0, 0, 0))
-        draw(s, 0, 0, size)
+        s = _picture(size)
+        if s is None:                      # no picture (a bare system): draw it
+            s = pygame.Surface((size, size), SRCALPHA)
+            s.fill((0, 0, 0, 0))
+            draw(s, 0, 0, size)
         _cache[size] = s
     return s

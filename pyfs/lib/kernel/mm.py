@@ -1,8 +1,11 @@
 # Memory management policy.
 #
-# The Rust layer identity-maps the first 4 GiB and hands the VM an initial
-# heap. Everything else about memory is decided here: which physical frames
-# are free, growing the Python heap, and editing the page tables.
+# The Rust layer identity-maps the first 64 GiB, hands the VM an initial
+# heap and sets aside a "reserve" the heap grows into by itself when it is
+# full. Everything else about memory is decided here: which physical frames
+# are free (for drivers, DMA buffers and programs) and the page tables.
+#
+#   mm.stats()   -> {"total", "free", "python_used", "python_free", ...} in bytes
 import _kernel
 from kernel.hw import mem, peek32, peek64, poke64
 
@@ -27,10 +30,15 @@ def memory_map():
         p += peek32(p) + 4
 
 
+MAPPED = 64 << 30        # identity-mapped by rust/boot.rs
+LOW = 1 << 32            # many devices can only reach memory below 4 GiB (32-bit DMA)
+
+
 def init():
     global total_ram
     info = _kernel.info()
     floor = max(info["heap_end"], info["kernel_end"], info["initrd_end"], 0x100000)
+    pool = (info.get("pool_start", 0), info.get("pool_end", 0))
     regions.clear()
     _freed.clear()
     total_ram = 0
@@ -39,9 +47,10 @@ def init():
             continue
         total_ram += length
         start = (max(base, floor) + PAGE - 1) & ~(PAGE - 1)
-        end = min(base + length, 1 << 32) & ~(PAGE - 1)   # identity-mapped part
-        if end > start:
-            regions.append([start, end])
+        end = min(base + length, MAPPED) & ~(PAGE - 1)    # identity-mapped part
+        for s, e in ((start, min(end, pool[0])), (max(start, pool[1]), end)) if pool[1] > pool[0] else ((start, end),):
+            if e > s:                                    # the heap's reserve is not ours to hand out
+                regions.append([s, e])
 
 
 def free_bytes():
@@ -64,8 +73,11 @@ def alloc_frame():
     return addr
 
 
-def alloc_contiguous(count):
-    for r in regions:
+def alloc_contiguous(count, high=False):
+    """A run of physical frames. Low memory first (devices doing 32-bit DMA
+    need it); high=True takes memory above 4 GiB first when there is some."""
+    order = sorted(regions, key=lambda r: -r[0]) if high else regions
+    for r in order:
         if r[1] - r[0] >= count * PAGE:
             addr = r[0]
             r[0] += count * PAGE
@@ -82,11 +94,34 @@ def free_contiguous(addr, count):
     regions.append([addr, addr + count * PAGE])
 
 
-def grow_heap(mib=16):
-    """Move `mib` MiB of free RAM into the Python heap."""
-    addr = alloc_contiguous(mib * 256)
+def grow_heap(mib=16, force=False):
+    """Move `mib` MiB of free RAM into the Python heap. Usually not needed:
+    the heap grows by itself from its reserve. Returns 0 when it did nothing
+    because the reserve still has room."""
+    try:
+        if not force and _kernel.heap_pool()[1] >= (mib << 20):
+            return 0
+    except AttributeError:
+        pass
+    addr = alloc_contiguous(mib * 256, high=True)
     _kernel.heap_add(addr, mib << 20)
     return addr
+
+
+def stats():
+    """Where the RAM is, in bytes: total, free (for anything), and the Python heap."""
+    import gc
+    try:
+        pool_size, pool_free = _kernel.heap_pool()
+    except AttributeError:
+        pool_size = pool_free = 0
+    heap_free, heap_used = gc.mem_free(), gc.mem_alloc()   # mem_free counts the free reserve too
+    heap_free_now = max(0, heap_free - pool_free)          # ...this is what the heap itself has free
+    others = free_bytes()
+    return {"total": total_ram, "free": others + heap_free, "python_used": heap_used,
+            "python_free": heap_free_now, "heap": heap_free_now + heap_used, "reserve": pool_size,
+            "reserve_free": pool_free, "frames_free": others,
+            "spaces": len(spaces), "space_bytes": sum(sp.resident() for sp in spaces)}
 
 
 # ---- page tables ----
@@ -247,8 +282,3 @@ class AddressSpace:
 kernel_pml4 = root()
 
 
-def stats():
-    """Physical memory in use, in a dict."""
-    info = _kernel.info()
-    return {"total": total_ram, "free": free_bytes(), "heap": info["heap_end"] - info["heap_start"],
-            "spaces": len(spaces), "space_bytes": sum(s.resident() for s in spaces)}

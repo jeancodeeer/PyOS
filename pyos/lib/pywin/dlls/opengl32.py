@@ -1,4 +1,4 @@
-# opengl32.dll: OpenGL for Windows programs, drawn by PyOS's own OpenGL
+# opengl32.dll: OpenGL for Windows programs, drawn by SnakeyOS's own OpenGL
 # (pyos/lib/OpenGL). Also the WGL functions that tie it to a window.
 #
 # Most gl* functions only need their arguments read and passed on, so they
@@ -104,7 +104,7 @@ for _line in SIGNATURES.split("\n"):
 
 # ---- the ones that read or write memory, or return something ----
 
-@dll(1)
+@dll(0)
 def glGetError(p):
     if not bind(p):
         return 0

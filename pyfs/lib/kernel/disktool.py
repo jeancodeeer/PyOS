@@ -24,7 +24,7 @@ def disks():
         out.append(ata.ATADisk())
     except OSError:
         pass
-    for name in ("ahci", "nvme"):
+    for name in ("ahci", "nvme", "virtio_blk"):
         try:
             out += __import__("kernel." + name, None, None, ["disks"]).disks()
         except Exception:
@@ -150,3 +150,20 @@ def installed(mount="/disk"):
         return True
     except OSError:
         return False
+
+
+def apply_update(mount="/disk", log=None):
+    """At boot: an installed copy (an update from GitHub, or install()) also brings
+    /etc, /apps, /share and /bin: copy them over the system in RAM, so the boot
+    scripts, the apps, fonts and commands are the new ones too. (/lib needs no
+    copy: its folder goes first in the import path.)"""
+    src = mount + SYSTEM
+    count = 0
+    for part in ("etc", "apps", "share", "bin"):
+        try:
+            count += _copy_tree(src + "/" + part, "/" + part)
+        except OSError:
+            pass
+    if log and count:
+        log("update: %d files of %s applied" % (count, src))
+    return count

@@ -69,4 +69,12 @@ def gmtime(secs=None):
     return (y, m, d, rem // 3600, rem % 3600 // 60, rem % 60, (days + 3) % 7, 0)
 
 
-localtime = gmtime
+# The time zone: minutes to add to UTC (the clock chip keeps UTC). Settings
+# sets it, e.g. -300 for Peru or Colombia (UTC-5), 60 for Spain in winter.
+TZ_MINUTES = 0
+
+
+def localtime(secs=None):
+    if secs is None:
+        secs = time()
+    return gmtime(secs + TZ_MINUTES * 60)
