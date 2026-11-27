@@ -186,7 +186,7 @@ def first_boot(m):
     out += m.cmd("time.sleep_ms(500); 6 * 7", 60)
     check("an exception in a thread is reported, system carries on", "ZeroDivisionError" in out and "42" in out, out)
 
-    out = m.cmd("exec('for i in range(100):\\n    thread.start(lambda: None)\\n    time.sleep_ms(20)'); len(_kernel.threads())", 120)
+    out = m.cmd("exec('for i in range(100):\\n    thread.start(lambda: None)\\n    time.sleep_ms(20)\\ntime.sleep_ms(300)'); len(_kernel.threads())", 120)
     check("100 short-lived threads come and go", out.strip().endswith("4"), out)
 
     # Real keyboard: type  k=6*7 <Enter>  then  K="Hi" <Enter>  on the PS/2 keyboard.

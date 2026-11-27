@@ -918,7 +918,12 @@ class WindowManager:
         while self.running:
             frame_start = time.ticks_ms()
             for ev in pygame.event.get():
-                self.handle(ev)
+                try:
+                    self.handle(ev)
+                except Exception as e:                   # a menu, dialog or icon: the desktop goes on
+                    self.error(e)
+                    self.menu = None
+                    self.dirty = True
             while self.calls:
                 try:
                     self.calls.pop(0)()
@@ -926,6 +931,10 @@ class WindowManager:
                     self.error(e)
                 self.dirty = True
             now = time.ticks_ms()
+            if SCRIPT:                                   # actions added while running (tests)
+                script.extend(SCRIPT)
+                SCRIPT.clear()
+                script.sort(key=lambda a: a[0])
             while script and now - t0 >= script[0][0]:
                 try:
                     script.pop(0)[1]()
@@ -952,11 +961,14 @@ class WindowManager:
             if self.notice[0] and now > self.notice[1]:
                 self.notice = ("", 0)
                 self.dirty = True
-            self.check_idle(now)
-            self.check_hub(now)
-            if not self.update_checked and time.ticks_diff(now, t0) > 90000:
-                self.update_checked = True
-                self.background_update_check()
+            try:
+                self.check_idle(now)
+                self.check_hub(now)
+                if not self.update_checked and time.ticks_diff(now, t0) > 90000:
+                    self.update_checked = True
+                    self.background_update_check()
+            except Exception as e:
+                self.error(e)
             changed = [w for w in self.windows if w.dirty and not w.minimized]
             if (self.dirty or changed) and not self.screen_off:
                 drew_at = now
@@ -969,6 +981,10 @@ class WindowManager:
                         w.shadow = None
                     self.shadow, self.shadow_key = None, None
                     desktop.more_memory(32 << 20)
+                except Exception as e:                  # one bad frame: report it, close menus, go on
+                    self.error(e)
+                    self.menu = None
+                    self.dirty = False
             busy = time.ticks_diff(time.ticks_ms(), frame_start) / 33.0
             self.cpu_load = self.cpu_load * 0.9 + min(1.0, busy) * 0.1
             # 60 frames a second while something moves (games, videos, dragging); 30 when still
