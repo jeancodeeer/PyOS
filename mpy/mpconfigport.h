@@ -23,7 +23,12 @@ void mpk_heap_free(void *ptr);
 #define MICROPY_LONGINT_IMPL                (MICROPY_LONGINT_IMPL_MPZ)
 #define MICROPY_FLOAT_IMPL                  (MICROPY_FLOAT_IMPL_DOUBLE)
 #define MICROPY_USE_INTERNAL_ERRNO          (1)
+#if defined(__aarch64__)
+#define MICROPY_EMIT_X64                    (0)   // no ARM64 emitter in MicroPython:
+#define MICROPY_PYKERNEL_NATIVE_AS_BYTECODE (1)   // native/viper run as bytecode (mpy/modfast.c for the hot ones)
+#else
 #define MICROPY_EMIT_X64                    (1)   // @micropython.native / viper
+#endif
 
 // Interrupt handlers written in Python run on the VM scheduler.
 #define MICROPY_ENABLE_SCHEDULER            (1)
@@ -56,7 +61,11 @@ void mpk_heap_free(void *ptr);
 
 #define MICROPY_PY_SYS_PLATFORM             "pykernel"
 #define MICROPY_HW_BOARD_NAME               "PyKernel"
+#if defined(__aarch64__)
+#define MICROPY_HW_MCU_NAME                 "aarch64"
+#else
 #define MICROPY_HW_MCU_NAME                 "x86_64"
+#endif
 
 typedef intptr_t mp_int_t;
 typedef uintptr_t mp_uint_t;

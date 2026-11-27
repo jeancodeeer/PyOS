@@ -389,6 +389,10 @@ static mp_obj_t k_info(void) {
         MP_QSTR_multiboot, MP_QSTR_initrd_start, MP_QSTR_initrd_end,
         MP_QSTR_stack_base, MP_QSTR_stack_top, MP_QSTR_idt, MP_QSTR_boots,
         MP_QSTR_pool_start, MP_QSTR_pool_end,
+        // ARM64 (see rust/main.rs, mod I): 0 on PCs
+        MP_QSTR_arch, MP_QSTR_fb_addr, MP_QSTR_fb_width, MP_QSTR_fb_height, MP_QSTR_fb_pitch,
+        MP_QSTR_fb_format, MP_QSTR_rsdp, MP_QSTR_epoch, MP_QSTR_ecam, MP_QSTR_pio, MP_QSTR_psci,
+        MP_QSTR_timer_hz, MP_QSTR_mmap, MP_QSTR_mmap_size, MP_QSTR_mmap_desc, MP_QSTR_timer_irq,
     };
     mp_obj_t d = mp_obj_new_dict(MP_ARRAY_SIZE(names));
     for (size_t i = 0; i < MP_ARRAY_SIZE(names); i++) {

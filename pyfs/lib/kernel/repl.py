@@ -75,7 +75,8 @@ def _version():
     impl = sys.implementation
     mpy = ".".join(str(n) for n in impl.version[:3])
     lang = sys.version.split(";")[0]
-    return "Python %s (MicroPython v%s, PyKernel %s) [x86_64] on %s" % (lang, mpy, VERSION, sys.platform)
+    from kernel.arch import NAME
+    return "Python %s (MicroPython v%s, PyKernel %s) [%s] on %s" % (lang, mpy, VERSION, NAME, sys.platform)
 
 
 def banner():

@@ -20,6 +20,11 @@ total_ram = 0
 
 def memory_map():
     """Yield (base, length, type) from the bootloader memory map."""
+    from kernel.arch import ARM
+    if ARM:
+        from kernel import arch
+        yield from arch.memory_map()
+        return
     mbi = _kernel.info()["multiboot"]
     if not mbi or not peek32(mbi) & 0x40:
         return
@@ -30,7 +35,7 @@ def memory_map():
         p += peek32(p) + 4
 
 
-MAPPED = 64 << 30        # identity-mapped by rust/boot.rs
+MAPPED = (1 << 40) if _kernel.info().get("arch") == 1 else 64 << 30   # identity-mapped by rust/boot.rs (1 TiB on ARM64)
 LOW = 1 << 32            # many devices can only reach memory below 4 GiB (32-bit DMA)
 
 

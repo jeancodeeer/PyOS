@@ -3,6 +3,7 @@
 # Supports 8-bit baseline (SOF0/SOF1), grayscale or YCbCr, any subsampling,
 # restart markers. Progressive JPEGs raise ValueError.
 import micropython
+from kernel import arch as _arch   # ARM64: C versions of the viper functions
 from array import array
 import pygame
 
@@ -110,6 +111,7 @@ def _idct(blk: ptr32, out: ptr8, stride: int, off: int):
         out[o + 5] = 0 if vals5 < 0 else (255 if vals5 > 255 else vals5)
         out[o + 6] = 0 if vals6 < 0 else (255 if vals6 > 255 else vals6)
         out[o + 7] = 0 if vals7 < 0 else (255 if vals7 > 255 else vals7)
+_idct = _arch.fast(_idct, 'jpeg_idct')
 
 
 @micropython.viper
@@ -131,6 +133,7 @@ def _ycc(dst: ptr8, y: ptr8, cb: ptr8, cr: ptr8, w: int, h: int, ystride: int, c
             dst[d + 2] = 0 if R < 0 else (255 if R > 255 else R)
             dst[d + 3] = 255
             d += 4
+_ycc = _arch.fast(_ycc, 'jpeg_ycc')
 
 
 @micropython.viper
@@ -145,6 +148,7 @@ def _gray(dst: ptr8, y: ptr8, w: int, h: int, ystride: int):
             dst[d + 2] = v
             dst[d + 3] = 255
             d += 4
+_gray = _arch.fast(_gray, 'jpeg_gray')
 
 
 class _Bits:

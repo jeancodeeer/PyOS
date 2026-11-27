@@ -1,8 +1,16 @@
 # Builds the MicroPython VM + PyKernel glue into libmicropython.a
-# (freestanding x86_64, System V ABI). Run through tools/build.py.
+# (freestanding x86_64 or aarch64). Run through tools/build.py.
+#   make            x86_64 (build/mpy)
+#   make ARCH=aarch64   ARM64, with aarch64-linux-gnu-gcc (build/mpy-aarch64)
 
 MPTOP ?= ../vendor/micropython
+ARCH ?= x86_64
+ifeq ($(ARCH),aarch64)
+CROSS_COMPILE ?= aarch64-linux-gnu-
+BUILD ?= ../build/mpy-aarch64
+else
 BUILD ?= ../build/mpy
+endif
 
 include $(MPTOP)/py/mkenv.mk
 
@@ -14,9 +22,17 @@ include $(TOP)/extmod/extmod.mk
 
 INC += -Ilibc -I. -I$(TOP) -I$(BUILD)
 
+ifeq ($(ARCH),aarch64)
+# position independent: the UEFI loader (boot/aarch64) puts the kernel wherever RAM is free
+ARCH_CFLAGS = -fPIE -mno-outline-atomics -mcmodel=small
+else
+ARCH_CFLAGS = -fno-pie -fno-pic -mno-red-zone -mcmodel=small -fcf-protection=none
+WEBP_ARCH = -mno-sse4.1 -mno-sse4.2 -mno-avx -mno-avx2
+endif
+
 CFLAGS += $(INC) -std=gnu99 -Wall -O2 -DNDEBUG \
-	-ffreestanding -fno-pie -fno-pic -mno-red-zone -mcmodel=small \
-	-fno-stack-protector -fno-stack-clash-protection -fcf-protection=none \
+	-ffreestanding $(ARCH_CFLAGS) \
+	-fno-stack-protector -fno-stack-clash-protection \
 	-U_FORTIFY_SOURCE -fno-asynchronous-unwind-tables -fno-unwind-tables \
 	-fno-common -ffunction-sections -fdata-sections
 
@@ -37,6 +53,7 @@ SRC_C = \
 	arena.c \
 	modaes.c \
 	modjs.c \
+	modfast.c \
 	$(JS_C) \
 	$(MEDIA_C) \
 	mpthread.c \
@@ -52,7 +69,7 @@ SRC_C = \
 	$(SRC_LIB_LIBM_DBL_C) \
 	$(SRC_LIB_LIBM_DBL_SQRT_SW_C) \
 
-SRC_QSTR += mphal.c modkernel.c modgfx.c modmedia.c modaes.c modjs.c mpthread.c \
+SRC_QSTR += mphal.c modkernel.c modgfx.c modmedia.c modaes.c modjs.c modfast.c mpthread.c \
 	readline.c \
 	shared/runtime/pyexec.c \
 	shared/runtime/sys_stdio_mphal.c \
@@ -61,7 +78,7 @@ OBJ = $(PY_O) $(addprefix $(BUILD)/, $(SRC_C:.c=.o))
 
 # the third-party decoders: their own warnings are theirs; Arduino.h/pgmspace.h shims for Helix
 $(addprefix $(BUILD)/, $(MEDIA_C:.c=.o)): CFLAGS += -w -Imedia/shim -Imedia/h264bsd -O2 -DUSE_DEFAULT_STDLIB
-$(addprefix $(BUILD)/, $(WEBP_C:.c=.o)): CFLAGS += -Imedia/webp -mno-sse4.1 -mno-sse4.2 -mno-avx -mno-avx2
+$(addprefix $(BUILD)/, $(WEBP_C:.c=.o)): CFLAGS += -Imedia/webp $(WEBP_ARCH) -DWEBP_DISABLE_NEON=1
 $(addprefix $(BUILD)/, $(JS_C:.c=.o)): CFLAGS += -w -O2 -DPYKERNEL -DCONFIG_VERSION=\"2026-06-04\" -D_GNU_SOURCE
 
 all: $(BUILD)/libmicropython.a

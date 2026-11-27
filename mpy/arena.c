@@ -40,7 +40,11 @@ static volatile int lock;
 
 static inline void take_lock(void) {
     while (__atomic_exchange_n(&lock, 1, __ATOMIC_ACQUIRE)) {
+        #if defined(__aarch64__)
+        __asm__ volatile ("yield");
+#else
         __asm__ volatile ("pause");
+#endif
     }
 }
 

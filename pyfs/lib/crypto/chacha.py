@@ -4,6 +4,7 @@
 # viper emitter (32-bit unsigned arithmetic on raw arrays); Poly1305 uses
 # Python's big integers.
 import struct
+from kernel import arch as _arch   # ARM64: C versions of the viper functions
 import micropython
 from array import array
 
@@ -43,12 +44,14 @@ def _rounds(x: ptr32, s: ptr32, qr: ptr8):
             x[d] = xd
     for i in range(16):
         x[i] = uint(x[i]) + uint(s[i])
+_rounds = _arch.fast(_rounds, 'chacha_rounds')
 
 
 @micropython.viper
 def _xor(out: ptr8, data: ptr8, ks: ptr8, off: int, n: int):
     for i in range(n):
         out[off + i] = data[off + i] ^ ks[i]
+_xor = _arch.fast(_xor, 'chacha_xor')
 
 
 def chacha20(key, counter, nonce, data):

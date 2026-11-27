@@ -114,7 +114,7 @@ static WEBP_INLINE int _mm256_cvtsi256_si32(__m256i a) {
 // inline assembly would need to be modified for use with Native Client.
 #if ((defined(__ARM_NEON__) || defined(__aarch64__)) &&       \
      (!defined(HAVE_CONFIG_H) || defined(WEBP_HAVE_NEON))) && \
-    !defined(__native_client__)
+    !defined(__native_client__) && !defined(WEBP_DISABLE_NEON)   /* PyKernel: no *_neon.c files */
 #define WEBP_USE_NEON
 #endif
 

@@ -140,6 +140,11 @@ def _enable():
 
 def poweroff():
     """ACPI soft-off (S5). Returns only if the machine is still on."""
+    from kernel.arch import ARM
+    if ARM:                                  # ARM64: PSCI SYSTEM_OFF
+        from kernel import arch
+        arch.poweroff()
+        return
     if not tables:
         init()
     if s5 and fadt.get("pm1a_cnt"):
@@ -154,6 +159,11 @@ def poweroff():
 
 def reset():
     """Restart through the FADT reset register, then PCI 0xCF9, then the 8042."""
+    from kernel.arch import ARM
+    if ARM:                                  # ARM64: PSCI SYSTEM_RESET
+        from kernel import arch
+        arch.reset()
+        return
     if not tables:
         init()
     space, addr = fadt.get("reset_space"), fadt.get("reset_addr")

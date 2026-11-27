@@ -9,6 +9,7 @@
 # transparent Surface in the requested colour. If the atlases are missing,
 # the video card's 8x16 font is used instead.
 import json
+from kernel import arch as _arch   # ARM64: C versions of the viper functions
 import struct
 import micropython
 import _gfx
@@ -79,6 +80,7 @@ def _put(dst: ptr8, dw: int, dh: int, dx: int, dy: int, src: ptr8, sw: int, sx: 
                     dst[o + 1] = g
                     dst[o + 2] = r
                     dst[o + 3] = a
+_put = _arch.fast(_put, 'font_put')
 
 
 @micropython.viper
@@ -94,6 +96,7 @@ def _unrle(src: ptr8, i: int, end: int, dst: ptr8):
             dst[o] = b
             o += 1
             i += 1
+_unrle = _arch.fast(_unrle, 'font_unrle')
 
 
 class Atlas:

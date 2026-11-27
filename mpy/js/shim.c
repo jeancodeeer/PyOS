@@ -96,10 +96,10 @@ static int64_t wall_base_ms;      // milliseconds since 1970 when tsc_base was r
 static uint64_t tsc_base, tsc_per_ms = 1000000;
 static int tz_minutes;
 
+uint64_t rk_rdtsc(void);          // the CPU's counter (x86: TSC; ARM64: the generic timer)
+
 static inline uint64_t rdtsc(void) {
-    uint32_t lo, hi;
-    __asm__ volatile ("rdtsc" : "=a"(lo), "=d"(hi));
-    return ((uint64_t)hi << 32) | lo;
+    return rk_rdtsc();
 }
 
 void js_shim_set_clock(int64_t epoch_ms, int tz, uint64_t per_ms) {

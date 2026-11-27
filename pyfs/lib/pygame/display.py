@@ -56,6 +56,8 @@ def set_mode(size=(0, 0), flags=0, depth=0, display=0, vsync=0):
     w, h = int(size[0]) or DEFAULT[0], int(size[1]) or DEFAULT[1]
     _cursor_at = None
     _fb = video.set_mode(w, h)
+    if _fb.width < w or _fb.height < h:          # ARM64: the screen UEFI chose is smaller
+        w, h = min(w, _fb.width), min(h, _fb.height)
     _surface = Surface((w, h))
     _kmouse.bounds = (w, h)
     mouse._clamp()

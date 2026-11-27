@@ -4,6 +4,7 @@ use std::{env, fmt::Write, fs, path::PathBuf};
 
 fn main() {
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let arm = env::var("TARGET").map_or(false, |t| t.starts_with("aarch64"));
     let has_err = |v: u32| matches!(v, 8 | 10..=14 | 17 | 21 | 29 | 30);
 
     let mut s = String::from(".section .text.isr, \"ax\"\n.code64\n");
@@ -18,13 +19,14 @@ fn main() {
     for v in 0..256u32 {
         writeln!(s, "    .quad isr_stub_{v}").unwrap();
     }
-    fs::write(out.join("isr_stubs.s"), s).unwrap();
+    fs::write(out.join("isr_stubs.s"), if arm { String::new() } else { s }).unwrap();
 
     let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let lib = root.join("build").join("mpy");
+    let lib = root.join("build").join(if arm { "mpy-aarch64" } else { "mpy" });
     println!("cargo:rustc-link-search=native={}", lib.display());
     println!("cargo:rustc-link-lib=static=micropython");
     println!("cargo:rerun-if-changed={}", lib.join("libmicropython.a").display());
     println!("cargo:rerun-if-changed=rust/linker.ld");
+    println!("cargo:rerun-if-changed=rust/arm64/linker.ld");
     println!("cargo:rerun-if-changed=build.rs");
 }

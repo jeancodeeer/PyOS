@@ -8,7 +8,8 @@ from _kernel import outb
 from kernel import irq, pic
 
 HZ = 100
-VECTOR = pic.BASE + 0
+from kernel.arch import ARM, info as _arch_info
+VECTOR = _arch_info("timer_irq", 27) if ARM else pic.BASE + 0     # ARM64: the generic timer
 _subscribers = []
 _base = 0
 tsc_per_ms = 0
@@ -36,6 +37,11 @@ def ms():
 def init(hz=100):
     global HZ, _base, tsc_per_ms
     HZ = hz
+    if ARM:                       # rust/arm64 runs the generic timer at 100 Hz already
+        HZ = 100
+        _base = _kernel.irq_count(VECTOR)
+        _kernel.preempt(VECTOR, 1)
+        return
     divisor = 1193182 // hz
     outb(0x43, 0x36)              # channel 0, lo/hi, square wave
     outb(0x40, divisor & 0xFF)

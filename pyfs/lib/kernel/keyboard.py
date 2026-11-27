@@ -295,6 +295,10 @@ def _defaults():
 
 
 def init():
+    from kernel.arch import ARM
+    if ARM:                                  # no PS/2: USB keyboards (kernel/usb.py) type here
+        _defaults()
+        return
     while inb(0x64) & 1:                     # drain anything pending
         inb(0x60)
     _defaults()

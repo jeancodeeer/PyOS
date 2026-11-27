@@ -360,8 +360,11 @@ def format(dev=None):
 
 def find_disk():
     """The first disk: IDE, else SATA (AHCI), else NVMe, else virtio."""
+    from kernel.arch import ARM
+    first_error = OSError("no disk")
     try:
-        return ATADisk()
+        if not ARM:                           # IDE ports exist on PCs only
+            return ATADisk()
     except OSError as e:
         first_error = e
     for name in ("ahci", "nvme", "virtio_blk"):

@@ -46,6 +46,7 @@ extern "C" {
     fn thread_trampoline();
 }
 
+#[cfg(target_arch = "x86_64")]
 global_asm!(
     r#"
 .section .text.sched, "ax"
@@ -78,6 +79,50 @@ thread_trampoline:
     ud2
 "#,
     options(att_syntax)
+);
+
+#[cfg(target_arch = "aarch64")]
+global_asm!(
+    r#"
+.section .text.sched, "ax"
+.global rk_switch_stacks
+rk_switch_stacks:                      /* x0 = where to save sp, x1 = sp to load */
+    sub sp, sp, #160
+    stp x19, x20, [sp, #0]
+    stp x21, x22, [sp, #16]
+    stp x23, x24, [sp, #32]
+    stp x25, x26, [sp, #48]
+    stp x27, x28, [sp, #64]
+    stp x29, x30, [sp, #80]
+    stp d8, d9, [sp, #96]
+    stp d10, d11, [sp, #112]
+    stp d12, d13, [sp, #128]
+    stp d14, d15, [sp, #144]
+    mov x2, sp
+    str x2, [x0]
+    mov sp, x1
+    ldp x19, x20, [sp, #0]
+    ldp x21, x22, [sp, #16]
+    ldp x23, x24, [sp, #32]
+    ldp x25, x26, [sp, #48]
+    ldp x27, x28, [sp, #64]
+    ldp x29, x30, [sp, #80]
+    ldp d8, d9, [sp, #96]
+    ldp d10, d11, [sp, #112]
+    ldp d12, d13, [sp, #128]
+    ldp d14, d15, [sp, #144]
+    add sp, sp, #160
+    ret
+
+/* First code a new thread runs: x19 = entry, x20 = argument. */
+.global thread_trampoline
+thread_trampoline:
+    msr daifclr, #2
+    mov x0, x20
+    blr x19
+    bl rk_thread_exit
+    brk #0
+"#
 );
 
 unsafe fn table() -> &'static mut [Thread; MAX_THREADS] {
@@ -158,14 +203,29 @@ pub unsafe extern "C" fn rk_thread_create(entry: u64, arg: u64, stack: u64, size
     let slot = (1..MAX_THREADS).find(|&i| t[i].state == State::Free);
     if let Some(i) = slot {
         let top = (stack + size) & !15;
-        let frame = (top - 56) as *mut u64; // r15 r14 r13 r12 rbx rbp, return address
-        frame.write(0);
-        frame.add(1).write(0);
-        frame.add(2).write(entry);
-        frame.add(3).write(arg);
-        frame.add(4).write(0);
-        frame.add(5).write(0);
-        frame.add(6).write(thread_trampoline as *const () as u64);
+        #[cfg(target_arch = "x86_64")]
+        let frame = {
+            let frame = (top - 56) as *mut u64; // r15 r14 r13 r12 rbx rbp, return address
+            frame.write(0);
+            frame.add(1).write(0);
+            frame.add(2).write(entry);
+            frame.add(3).write(arg);
+            frame.add(4).write(0);
+            frame.add(5).write(0);
+            frame.add(6).write(thread_trampoline as *const () as u64);
+            frame
+        };
+        #[cfg(target_arch = "aarch64")]
+        let frame = {
+            let frame = (top - 160) as *mut u64; // x19..x30, d8..d15
+            for k in 0..20 {
+                frame.add(k).write(0);
+            }
+            frame.write(entry);
+            frame.add(1).write(arg);
+            frame.add(11).write(thread_trampoline as *const () as u64);
+            frame
+        };
         t[i] = Thread { sp: frame as u64, top, tls: 0, state: State::Runnable, ticks: 0, switches: 0 };
     }
     cpu::rk_irq_restore(f);
@@ -203,8 +263,7 @@ pub unsafe extern "C" fn rk_thread_wait(flags: u64) {
             switch_to(next);
             break; // only runnable threads get switched back in
         }
-        // (no `nomem`: interrupt handlers change thread states while halted)
-        asm!("sti", "hlt", "cli", options(nostack));
+        idle();
         if table()[cur].state == State::Runnable {
             break;
         }
@@ -222,9 +281,18 @@ pub unsafe extern "C" fn rk_thread_exit() -> ! {
         if let Some(next) = pick_next() {
             switch_to(next);
         }
-        // (no `nomem`: interrupt handlers change thread states while halted)
-        asm!("sti", "hlt", "cli", options(nostack));
+        idle();
     }
+}
+
+/// Let interrupts in and sleep until one comes; back with them masked.
+/// (no `nomem`: interrupt handlers change thread states while halted)
+#[inline(always)]
+unsafe fn idle() {
+    #[cfg(target_arch = "x86_64")]
+    asm!("sti", "hlt", "cli", options(nostack));
+    #[cfg(target_arch = "aarch64")]
+    asm!("wfi", "msr daifclr, #2", "isb", "msr daifset, #2", options(nostack));
 }
 
 /// Saved stack range of a switched-out thread, for the garbage collector.

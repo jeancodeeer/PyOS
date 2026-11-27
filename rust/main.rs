@@ -7,8 +7,20 @@
 #![no_std]
 #![no_main]
 
+#[cfg(target_arch = "x86_64")]
 mod boot;
+#[cfg(target_arch = "x86_64")]
 mod cpu;
+#[cfg(target_arch = "x86_64")]
+mod interrupts;
+#[cfg(target_arch = "aarch64")]
+#[path = "arm64/boot.rs"]
+mod boot;
+#[cfg(target_arch = "aarch64")]
+#[path = "arm64/cpu.rs"]
+mod cpu;
+#[cfg(target_arch = "aarch64")]
+#[path = "arm64/interrupts.rs"]
 mod interrupts;
 mod sched;
 mod serial;
@@ -32,21 +44,52 @@ extern "C" {
 
 // ---- boot information, readable from Python via _kernel.info() ----
 
-const INFO_LEN: usize = 13;
+const INFO_LEN: usize = 32;
 static INFO: [AtomicU64; INFO_LEN] = [const { AtomicU64::new(0) }; INFO_LEN];
-const I_KSTART: usize = 0;
-const I_KEND: usize = 1;
-const I_HEAP_START: usize = 2;
-const I_HEAP_END: usize = 3;
-const I_MBI: usize = 4;
-const I_INITRD_START: usize = 5;
-const I_INITRD_END: usize = 6;
-const I_STACK_BASE: usize = 7;
-const I_STACK_TOP: usize = 8;
-const I_IDT: usize = 9;
-const I_BOOTS: usize = 10;
-const I_POOL_START: usize = 11;
-const I_POOL_END: usize = 12;
+
+/// The indexes of _kernel.info() (names in mpy/modkernel.c, same order).
+#[allow(non_snake_case, dead_code)]
+pub mod I {
+    pub const KSTART: usize = 0;
+    pub const KEND: usize = 1;
+    pub const HEAP_START: usize = 2;
+    pub const HEAP_END: usize = 3;
+    pub const MBI: usize = 4;
+    pub const INITRD_START: usize = 5;
+    pub const INITRD_END: usize = 6;
+    pub const STACK_BASE: usize = 7;
+    pub const STACK_TOP: usize = 8;
+    pub const IDT: usize = 9;
+    pub const BOOTS: usize = 10;
+    pub const POOL_START: usize = 11;
+    pub const POOL_END: usize = 12;
+    // ARM64 (0 on PCs, except ARCH = 0)
+    pub const ARCH: usize = 13;          // 0 x86_64, 1 aarch64
+    pub const FB_ADDR: usize = 14;
+    pub const FB_WIDTH: usize = 15;
+    pub const FB_HEIGHT: usize = 16;
+    pub const FB_PITCH: usize = 17;
+    pub const FB_FORMAT: usize = 18;
+    pub const RSDP: usize = 19;
+    pub const EPOCH: usize = 20;
+    pub const ECAM: usize = 21;
+    pub const PIO: usize = 22;
+    pub const PSCI: usize = 23;
+    pub const TIMER_HZ: usize = 24;
+    pub const MMAP: usize = 25;
+    pub const MMAP_SIZE: usize = 26;
+    pub const MMAP_DESC: usize = 27;
+    pub const TIMER_IRQ: usize = 28;
+}
+use I::{BOOTS as I_BOOTS, HEAP_END as I_HEAP_END, HEAP_START as I_HEAP_START, INITRD_END as I_INITRD_END,
+        INITRD_START as I_INITRD_START, POOL_END as I_POOL_END, POOL_START as I_POOL_START};
+#[cfg(target_arch = "x86_64")]
+use I::{IDT as I_IDT, KEND as I_KEND, KSTART as I_KSTART, MBI as I_MBI, STACK_BASE as I_STACK_BASE,
+        STACK_TOP as I_STACK_TOP};
+
+pub fn info_set(i: usize, v: u64) {
+    INFO[i].store(v, Relaxed);
+}
 
 #[no_mangle]
 pub extern "C" fn rk_info(i: u32) -> u64 {
@@ -86,13 +129,16 @@ pub extern "C" fn rk_stdin_empty() -> bool {
 
 // ---- multiboot ----
 
+#[cfg(target_arch = "x86_64")]
 unsafe fn rd32(a: u64) -> u32 {
     core::ptr::read_unaligned(a as *const u32)
 }
+#[cfg(target_arch = "x86_64")]
 unsafe fn rd64(a: u64) -> u64 {
     core::ptr::read_unaligned(a as *const u64)
 }
 
+#[cfg(target_arch = "x86_64")]
 const MAPPED: u64 = 64 << 30;              // identity-mapped by boot.rs
 const HEAP_FIRST: u64 = 48 << 20;          // the Python heap to start with...
 const KEEP_FREE: u64 = 192 << 20;          // ...and RAM always left for drivers, DMA and programs
@@ -100,6 +146,7 @@ const KEEP_FREE: u64 = 192 << 20;          // ...and RAM always left for drivers
 /// Record the boot archive (module 0) and choose the Python heap: a slice of
 /// the largest usable RAM region above the kernel image. The rest of RAM is
 /// left for Python's own memory manager, which can grow the heap later.
+#[cfg(target_arch = "x86_64")]
 unsafe fn scan_multiboot(magic: u32, mbi: u64) {
     let mut floor = core::ptr::addr_of!(__kernel_end) as u64;
     if magic != 0x2BADB002 {
@@ -151,6 +198,11 @@ unsafe fn scan_multiboot(magic: u32, mbi: u64) {
         set_heap(floor, 64 << 20);
         return;
     }
+    plan_memory(&mut regions, n, total);
+}
+
+/// The Python heap in the largest region below 4 GiB, and its reserve (see above).
+pub fn plan_memory(regions: &mut [(u64, u64); 32], n: usize, total: u64) {
     // the heap: in the largest region below 4 GiB (where most RAM of small machines is)
     let mut h = 0;
     for i in 0..n {
@@ -190,6 +242,7 @@ fn set_heap(region_start: u64, region_end: u64) {
 /// Locate `init.py` in the boot archive ("PYFS", u32 count, then entries of
 /// u16 name length, u32 data length, name, data).
 unsafe fn find_init() -> Option<(*const u8, usize)> {
+    let rd32 = |a: u64| core::ptr::read_unaligned(a as *const u32);
     let (start, end) = (INFO[I_INITRD_START].load(Relaxed), INFO[I_INITRD_END].load(Relaxed));
     if end < start + 8 || rd32(start) != u32::from_le_bytes(*b"PYFS") {
         return None;
@@ -243,6 +296,15 @@ unsafe fn python_session() {
     mp_deinit();
 }
 
+/// The Python world, forever (each soft reboot starts a new one).
+pub unsafe fn run() -> ! {
+    loop {
+        python_session();
+        klog!("\nPyKernel: soft reboot");
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
 #[no_mangle]
 pub unsafe extern "C" fn kmain(magic: u32, mbi: u32) -> ! {
     serial::init();
@@ -259,10 +321,7 @@ pub unsafe extern "C" fn kmain(magic: u32, mbi: u32) -> ! {
         INFO[I_HEAP_START].load(Relaxed),
         INFO[I_HEAP_END].load(Relaxed)
     );
-    loop {
-        python_session();
-        klog!("\nPyKernel: soft reboot");
-    }
+    run()
 }
 
 /// Called by the C glue when the VM hits an unrecoverable state.

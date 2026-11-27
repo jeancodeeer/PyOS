@@ -18,6 +18,7 @@
 # Flags: 1 depth test, 2 depth write, 4 texture, 8 texture x colour,
 # 16 the depth test passes when equal too (GL_LEQUAL), 32 blend with alpha.
 import micropython
+from kernel import arch as _arch   # ARM64: C versions of the viper functions
 
 DEPTH_TEST, DEPTH_WRITE, TEXTURE, MODULATE, LEQUAL, BLEND = 1, 2, 4, 8, 16, 32
 VERTEX = 10
@@ -239,6 +240,7 @@ def triangles(color: ptr8, depth: ptr32, width: int, verts: ptr32, tris: ptr32, 
             v0 += vy
             q0 += qy
             y += 1
+triangles = _arch.fast(triangles, 'triangles')
 
 
 @micropython.viper
@@ -267,6 +269,7 @@ def line(color: ptr8, depth: ptr32, width: int, height: int, x: int, y: int, z: 
         y += dy
         z += zstep
         i += 1
+line = _arch.fast(line, 'line')
 
 
 @micropython.viper
@@ -276,6 +279,7 @@ def fill32(buf: ptr32, count: int, value: int):
     while i < count:
         buf[i] = value
         i += 1
+fill32 = _arch.fast(fill32, 'fill32')
 
 
 @micropython.viper
@@ -287,3 +291,4 @@ def rgb_to_rgba(src: ptr8, dst: ptr8, count: int):
         dst[i * 4 + 2] = src[i * 3 + 2]
         dst[i * 4 + 3] = 255
         i += 1
+rgb_to_rgba = _arch.fast(rgb_to_rgba, 'rgb_to_rgba')

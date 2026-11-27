@@ -1,0 +1,18 @@
+[package]
+name = "bootaa64"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "bootaa64"
+path = "src/main.rs"
+test = false
+bench = false
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+debug = false
+
+[profile.dev]
+panic = "abort"

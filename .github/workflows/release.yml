@@ -1,4 +1,6 @@
-# Builds SnakeyOS from source and publishes the bootable ISO.
+# Builds SnakeyOS from source and publishes the bootable ISOs:
+#   SnakeyOSx86.iso     PCs (x86_64, BIOS and UEFI)
+#   SnakeyOSARM64.iso   ARM64 machines with UEFI (QEMU virt, servers, Raspberry Pi 4/5 with UEFI firmware)
 #
 #   git tag v1.0 && git push origin v1.0     -> a release named after the tag
 #   Actions -> Release -> Run workflow       -> the same, by hand
@@ -29,30 +31,49 @@ jobs:
       - name: Tools (GRUB and xorriso for the ISO, QEMU to try it)
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends grub-pc-bin grub-efi-amd64-bin grub-common xorriso mtools qemu-system-x86
+          sudo apt-get install -y -qq --no-install-recommends grub-pc-bin grub-efi-amd64-bin grub-common xorriso mtools \
+            qemu-system-x86 qemu-system-arm qemu-efi-aarch64 gcc-aarch64-linux-gnu
 
       - name: Rust for a bare-metal x86_64 target
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-none
+          targets: x86_64-unknown-none, aarch64-unknown-none, aarch64-unknown-uefi
           components: llvm-tools
 
       - name: Build PyKernel + SnakeyOS
         run: python3 tools/build.py
 
-      - name: Make the ISO
+      - name: Build for ARM64 (kernel, UEFI loader)
+        run: python3 tools/build.py --arch aarch64
+
+      - name: Make the ISOs
         run: |
           python3 tools/iso.py
+          python3 tools/iso.py --arch aarch64
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
-          cp build/snakeyos.iso "snakeyos-${TAG#v}.iso"
-          sha256sum "snakeyos-${TAG#v}.iso" > "snakeyos-${TAG#v}.iso.sha256"
+          cp build/snakeyos.iso SnakeyOSx86.iso
+          cp build/snakeyos-arm64.iso SnakeyOSARM64.iso
+          sha256sum SnakeyOSx86.iso > SnakeyOSx86.iso.sha256
+          sha256sum SnakeyOSARM64.iso > SnakeyOSARM64.iso.sha256
 
-      - name: Boot it once in QEMU (it must reach the SnakeyOS prompt)
+      - name: Boot the PC one in QEMU (it must reach SnakeyOS)
         run: |
-          timeout 120 qemu-system-x86_64 -m 512 -cdrom "snakeyos-${TAG#v}.iso" -boot d -display none \
+          timeout 120 qemu-system-x86_64 -m 512 -cdrom SnakeyOSx86.iso -boot d -display none \
             -serial stdio -no-reboot > boot.log 2>&1 || true
           grep -a "SnakeyOS" boot.log
+
+      - name: Boot the ARM64 one in QEMU (UEFI, virt machine; it must reach SnakeyOS)
+        run: |
+          cp /usr/share/AAVMF/AAVMF_VARS.fd vars.fd
+          timeout 300 qemu-system-aarch64 -M virt,gic-version=2 -cpu cortex-a72 -m 1024 \
+            -drive if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.fd \
+            -drive if=pflash,format=raw,file=vars.fd -device ramfb -device qemu-xhci -device usb-kbd \
+            -drive file=SnakeyOSARM64.iso,media=cdrom,if=none,id=cd,readonly=on \
+            -device virtio-scsi-pci -device scsi-cd,drive=cd -nic user,model=virtio-net-pci \
+            -display none -serial stdio -no-reboot > boot-arm64.log 2>&1 || true
+          tail -c 2000 boot-arm64.log
+          grep -a "sobre PyKernel" boot-arm64.log
 
       - name: The signed update (SnakeyOS Update), when the signing key is a repository secret
         env:
@@ -73,8 +94,10 @@ jobs:
           name: SnakeyOS ${{ env.TAG }}
           body_path: docs/releases/${{ env.TAG }}.md
           files: |
-            snakeyos-*.iso
-            snakeyos-*.iso.sha256
+            SnakeyOSx86.iso
+            SnakeyOSx86.iso.sha256
+            SnakeyOSARM64.iso
+            SnakeyOSARM64.iso.sha256
             docs/video/pyos-demo.mp4
             dist/snakeyos-*.zip
             dist/update.json
