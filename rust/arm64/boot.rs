@@ -49,6 +49,15 @@ _start:
     mov x0, #3
     msr cnthctl_el2, x0
     msr cntvoff_el2, xzr
+    mrs x0, id_aa64pfr0_el1             /* a GICv3 CPU interface: open it to EL1 */
+    ubfx x0, x0, #24, #4
+    cbz x0, 4f
+    mrs x0, S3_4_C12_C9_5               /* ICC_SRE_EL2 */
+    orr x0, x0, #0xf                    /* SRE, DFB, DIB, Enable */
+    msr S3_4_C12_C9_5, x0
+    isb
+    msr S3_4_C12_C11_0, xzr             /* ICH_HCR_EL2 */
+4:
     ldr x0, =0x30d00800
     msr sctlr_el1, x0
     mov x0, #0x3c5
@@ -354,6 +363,8 @@ pub struct Hw {
     pub gicd: u64,
     pub gicc: u64,
     pub gic_version: u8,
+    pub gicr: u64,       // GICv3: the redistributors
+
     pub ecam: u64,
     pub ecam_bus0: u8,
     pub ecam_bus1: u8,
@@ -362,7 +373,7 @@ pub struct Hw {
     pub timer_irq: u32,
 }
 
-pub static mut HW: Hw = Hw { gicd: 0, gicc: 0, gic_version: 2, ecam: 0, ecam_bus0: 0, ecam_bus1: 255,
+pub static mut HW: Hw = Hw { gicd: 0, gicc: 0, gic_version: 2, gicr: 0, ecam: 0, ecam_bus0: 0, ecam_bus1: 255,
                              uart: 0x0900_0000, psci: 2, timer_irq: 27 };
 
 unsafe fn acpi(rsdp: u64) {
@@ -390,9 +401,14 @@ unsafe fn acpi(rsdp: u64) {
                     }
                     if kind == 0x0B && hw.gicc == 0 {
                         hw.gicc = rdu((p + 32) as *const u64);
+                        if l >= 76 && hw.gicr == 0 {
+                            hw.gicr = rdu((p + 68) as *const u64);     // GICR base of this CPU (GICv3)
+                        }
                     } else if kind == 0x0C {
                         hw.gicd = rdu((p + 8) as *const u64);
                         hw.gic_version = rdu((p + 20) as *const u8);
+                    } else if kind == 0x0E {
+                        hw.gicr = rdu((p + 4) as *const u64);          // GICR discovery range
                     }
                     p += l;
                 }
@@ -443,8 +459,8 @@ pub unsafe extern "C" fn kmain_arm(bi: &BootInfo) -> ! {
     crate::serial::init((*core::ptr::addr_of!(HW)).uart);
     klog!("\nPyKernel: rust layer up (ARM64)");
     let hw = &*core::ptr::addr_of!(HW);
-    klog!("acpi: GICv{} dist {:#x} cpu {:#x}, PCIe {:#x}, UART {:#x}, PSCI {}, timer irq {}",
-          hw.gic_version, hw.gicd, hw.gicc, hw.ecam, hw.uart, ["none", "smc", "hvc"][hw.psci as usize], hw.timer_irq);
+    klog!("acpi: GICv{} dist {:#x} cpu {:#x} redist {:#x}, PCIe {:#x}, UART {:#x}, PSCI {}, timer irq {}",
+          hw.gic_version, hw.gicd, hw.gicc, hw.gicr, hw.ecam, hw.uart, ["none", "smc", "hvc"][hw.psci as usize], hw.timer_irq);
     crate::cpu::set_pci(hw.ecam, hw.ecam_bus0, hw.ecam_bus1, PIO_WINDOW);
     crate::interrupts::init(hw);
 
