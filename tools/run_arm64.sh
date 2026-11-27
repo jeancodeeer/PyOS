@@ -6,7 +6,7 @@ ISO=${1:-build/snakeyos-arm64.iso}
 [ $# -gt 0 ] && shift
 VARS=build/aavmf_vars.fd
 [ -f $VARS ] || cp /usr/share/AAVMF/AAVMF_VARS.fd $VARS
-exec qemu-system-aarch64 -M virt,gic-version=2 -cpu cortex-a72 -m 1024 \
+exec qemu-system-aarch64 -M virt,gic-version=${GIC:-2} -cpu ${CPU:-cortex-a72} -m 1024 \
   -drive if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.fd \
   -drive if=pflash,format=raw,file=$VARS \
   -device ramfb -device qemu-xhci -device usb-kbd -device usb-tablet \

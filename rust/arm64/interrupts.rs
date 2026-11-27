@@ -1,4 +1,4 @@
-//! Exceptions and interrupts on ARM64: the GIC (v2) and the generic timer.
+//! Exceptions and interrupts on ARM64: the GIC (v2 or v3) and the generic timer.
 //!
 //! As on PCs, Rust only counts an interrupt and queues the Python handler
 //! registered for it; the "vector" Python sees is the GIC interrupt number
@@ -32,6 +32,8 @@ static FAULT: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 
 static mut GICD: u64 = 0;
 static mut GICC: u64 = 0;
+static mut V3: bool = false;
+static mut SGI: u64 = 0;              // GICv3: this CPU's redistributor, SGI/PPI frame
 static mut TIMER_IRQ: u32 = 27;
 static mut TIMER_STEP: u64 = 0;
 
@@ -53,18 +55,103 @@ unsafe fn line(id: u32, on: bool) {
         return;
     }
     let reg = if on { 0x100 } else { 0x180 };
+    if V3 && id < 32 {                                   // private lines live in the redistributor
+        wr((SGI + reg) as *mut u32, 1 << id);
+        return;
+    }
     wr(d32(reg + (id as u64 / 32) * 4), 1 << (id % 32));
+}
+
+macro_rules! sysreg_w {
+    ($r:literal, $v:expr) => { core::arch::asm!(concat!("msr ", $r, ", {}"), in(reg) $v as u64) };
+}
+
+/// GICv3: distributor with affinity routing, this CPU's redistributor, and the
+/// CPU interface through system registers.
+unsafe fn init_v3(hw: &Hw) -> bool {
+    if hw.gicr == 0 {
+        klog!("irq: GICv3 without a redistributor address");
+        return false;
+    }
+    let mpidr: u64;
+    core::arch::asm!("mrs {}, mpidr_el1", out(reg) mpidr);
+    let aff = (mpidr & 0xFF_FFFF) | ((mpidr >> 32) & 0xFF) << 24;
+    // find our redistributor: frames of 128 KiB (256 KiB with virtual LPIs)
+    let mut frame = hw.gicr;
+    let mut found = 0u64;
+    for _ in 0..512 {
+        let typer = core::ptr::read_volatile((frame + 8) as *const u64);
+        if typer >> 32 == aff {
+            found = frame;
+            break;
+        }
+        if typer & (1 << 4) != 0 {                       // the last one
+            break;
+        }
+        frame += if typer & (1 << 1) != 0 { 0x40000 } else { 0x20000 };
+    }
+    if found == 0 {
+        found = hw.gicr;                                  // one CPU: the first frame
+    }
+    // wake it up
+    let waker = (found + 0x14) as *mut u32;
+    wr(waker, rd(waker) & !(1 << 1));
+    for _ in 0..1_000_000 {
+        if rd(waker) & (1 << 2) == 0 {
+            break;
+        }
+    }
+    SGI = found + 0x10000;
+    wr((SGI + 0x180) as *mut u32, 0xFFFF_FFFF);           // private lines off
+    wr((SGI + 0x080) as *mut u32, 0xFFFF_FFFF);           // group 1
+    for i in (0..32).step_by(4) {
+        wr((SGI + 0x400 + i) as *mut u32, 0xA0A0_A0A0);
+    }
+    // distributor: affinity routing, group 1, everything to this CPU
+    wr(d32(0), 0);
+    while rd(d32(0)) & (1 << 31) != 0 {}
+    let lines = ((rd(d32(4)) & 0x1F) + 1) * 32;
+    for i in (32..lines).step_by(32) {
+        wr(d32(0x180 + i as u64 / 8), 0xFFFF_FFFF);
+        wr(d32(0x280 + i as u64 / 8), 0xFFFF_FFFF);
+        wr(d32(0x080 + i as u64 / 8), 0xFFFF_FFFF);
+    }
+    for i in (32..lines).step_by(4) {
+        wr(d32(0x400 + i as u64), 0xA0A0_A0A0);
+    }
+    for i in (32..lines).step_by(16) {
+        wr(d32(0xC00 + i as u64 / 4), 0);
+    }
+    for i in 32..lines {
+        core::ptr::write_volatile((GICD + 0x6000 + 8 * i as u64) as *mut u64, aff & 0xFF_FFFF | (aff >> 24) << 32);
+    }
+    wr(d32(0), (1 << 4) | (1 << 1));                      // ARE_NS, EnableGrp1NS
+    while rd(d32(0)) & (1 << 31) != 0 {}
+    // CPU interface
+    let mut sre: u64;
+    core::arch::asm!("mrs {}, S3_0_C12_C12_5", out(reg) sre);
+    sre |= 1;
+    sysreg_w!("S3_0_C12_C12_5", sre);                     // ICC_SRE_EL1.SRE
+    core::arch::asm!("isb");
+    sysreg_w!("S3_0_C4_C6_0", 0xF0u64);                   // ICC_PMR_EL1
+    sysreg_w!("S3_0_C12_C12_3", 0u64);                    // ICC_BPR1_EL1
+    sysreg_w!("S3_0_C12_C12_7", 1u64);                    // ICC_IGRPEN1_EL1
+    core::arch::asm!("isb");
+    V3 = true;
+    true
 }
 
 pub fn init(hw: &Hw) {
     unsafe {
-        if hw.gic_version > 2 {
-            klog!("irq: GICv{} is not supported yet; no interrupts (polling only)", hw.gic_version);
-            return;
-        }
         GICD = hw.gicd;
         GICC = hw.gicc;
         TIMER_IRQ = hw.timer_irq;
+        if hw.gic_version >= 3 {
+            if !init_v3(hw) {
+                GICD = 0;
+            }
+            return;
+        }
         if GICD == 0 || GICC == 0 {
             klog!("irq: no GIC found");
             return;
@@ -128,10 +215,16 @@ extern "C" fn arm_exception(f: &mut Frame) {
 
 fn irq() {
     unsafe {
-        if GICC == 0 {
+        if GICD == 0 || (!V3 && GICC == 0) {
             return;
         }
-        let iar = rd(c32(0x0C));
+        let iar = if V3 {
+            let v: u64;
+            core::arch::asm!("mrs {}, S3_0_C12_C12_0", out(reg) v);   // ICC_IAR1_EL1
+            v as u32
+        } else {
+            rd(c32(0x0C))
+        };
         let id = iar & 0x3FF;
         if id >= 1020 {
             return;
@@ -141,7 +234,11 @@ fn irq() {
         } else if id >= 32 {
             line(id, false);                     // until Python has handled it
         }
-        wr(c32(0x10), iar);                      // end of interrupt: others may come
+        if V3 {
+            sysreg_w!("S3_0_C12_C12_1", iar);    // ICC_EOIR1_EL1
+        } else {
+            wr(c32(0x10), iar);                  // end of interrupt: others may come
+        }
         let v = id as usize;
         if v >= N {
             return;
