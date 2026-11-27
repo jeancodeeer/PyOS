@@ -19,7 +19,7 @@ It boots on a bare x86_64 machine. Under it there is no Linux and no Windows: on
 </div>
 
 ```
-N° 003 — PYOS                                                         REF. 1.0
+N° 003 — SNAKEYOS                                                         REF. 1.0
 x86_64 · PyKernel + MicroPython 1.25 · every driver, window and app is a .py file
 QEMU-tested, not hardware-tested · MicroPython, not CPython · pygame-compatible, not SDL pygame
 ```
