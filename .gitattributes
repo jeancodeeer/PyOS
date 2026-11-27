@@ -2,3 +2,7 @@
 *.sh text eol=lf
 *.patch text eol=lf
 *.png binary
+
+# third-party code: not counted in the language statistics
+mpy/js/quickjs/** linguist-vendored
+vendor/** linguist-vendored
