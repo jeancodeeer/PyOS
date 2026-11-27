@@ -36,9 +36,19 @@ dll.alias("OleUninitialize", "CoUninitialize")
 
 @dll(5)
 def CoCreateInstance(p, clsid, outer, context, iid, out):
+    """The COM classes PyWin has, written in Python (CLSID_ShellLink, for installers' shortcuts)."""
+    from pywin import winpaths, shelllink
     if out:
         mem.put64(out, 0)
-    return REGDB_E_CLASSNOTREG
+    if not clsid or not out:
+        return 0x80070057                                   # E_INVALIDARG
+    cls = shelllink.CLASSES.get(winpaths.guid_text(clsid))
+    if cls is None:
+        return REGDB_E_CLASSNOTREG
+    obj = cls(p)
+    r = obj.QueryInterface(0, iid, out)
+    obj.Release(0)
+    return r
 
 
 @dll(1)

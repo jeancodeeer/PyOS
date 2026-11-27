@@ -29,8 +29,8 @@ TITLE_TEXT_OFF = (150, 154, 162)
 WIN_BORDER = (190, 194, 204)
 
 # desktop
-TOP_H = 28                         # top bar: menu, clock, status
-DOCK_H = 64                        # dock with the app icons
+TOP_H = 30                         # top bar: menu, clock, status
+DOCK_H = 90                        # the glass dock with the app icons
 WALL_TOP = (24, 62, 118)           # wallpaper: deep Python blue ...
 WALL_BOTTOM = (250, 214, 110)      # ... melting into soft yellow
 PANEL = (250, 250, 246, 222)       # frosted, light bars (macOS-like)

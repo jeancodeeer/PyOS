@@ -271,15 +271,19 @@ class Host:
                     _wm().close(wnd.host)
             if isinstance(self.console, ConsoleApp):
                 self.console.out("\n[el programa ha terminado con el codigo %d]\n" % (code if code < 0x80000000 else code - (1 << 32)))
-            elif code not in (0,):
+            elif code not in (0,) and getattr(self, "on_exit", None) is None:
                 _wm().toast("%s ha terminado con el codigo %#x" % (self.name, code))
+            if getattr(self, "on_exit", None) is not None:
+                self.on_exit(code)
         _wm().later(finished)
 
 
-def start(path, args=()):
-    """Run a Windows program on the desktop. Returns the Host, or None."""
+def start(path, args=(), on_exit=None):
+    """Run a Windows program on the desktop. Returns the Host, or None.
+    on_exit(code) is called in the desktop's loop when the program ends (installers)."""
     name = path.rsplit("/", 1)[-1]
     host = Host(name)
+    host.on_exit = on_exit
 
     def load_and_run():
         # loading a big program takes a moment: it happens here, in the
@@ -293,6 +297,8 @@ def start(path, args=()):
             _debug("no se pudo cargar: %r" % e)
             host.running = False
             _wm().later(lambda: _wm().toast("PyWin: no se puede abrir %s: %s" % (name, e)))
+            if on_exit is not None:
+                _wm().later(lambda: on_exit(0xFFFFFFFF))
             return
         if host.p.image.console:
             host.open_console()

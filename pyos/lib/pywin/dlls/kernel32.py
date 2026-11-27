@@ -377,11 +377,15 @@ def IsValidCodePage(p, cp):
 
 @dll(3)
 def GetEnvironmentVariableA(p, name, buf, size):
-    p.last_error = 203                           # ERROR_ENVVAR_NOT_FOUND
-    return 0
-
-
-dll.alias("GetEnvironmentVariableW", "GetEnvironmentVariableA")
+    from pywin import winpaths
+    value = winpaths.environment().get((mem.cstr(name) or "").upper())
+    if value is None:
+        p.last_error = 203                       # ERROR_ENVVAR_NOT_FOUND
+        return 0
+    if size <= len(value):
+        return len(value) + 1
+    mem.put_cstr(buf, value)
+    return len(value)
 
 
 @dll(2)

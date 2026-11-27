@@ -107,7 +107,7 @@ How it works, in four files:
 3. **`process.py`** gives the program a stack, a TEB/PEB (through the GS register) and threads; Python runs the Windows function and jumps back.
 4. **`dlls/*.py`** are the DLLs: `kernel32` (files, memory, threads, events, mutexes, TLS, DLL loading), `msvcrt` (`printf`, `scanf`, `malloc`…), `user32` (windows, messages, menus, controls), `gdi32` (drawing), `opengl32`/`glu32`, `advapi32` (a registry kept in a JSON file), `shell32`, `comdlg32`. C++ `throw`/`catch` work: `seh.py` unwinds the stack with the program's own `.pdata` tables.
 
-Examples with their C/C++ source are in [`pyos/share/pywin/ejemplos`](pyos/share/pywin/ejemplos): a console program, `scanf`, C++ STL and exceptions, threads, a DLL of its own, console colours and the registry, Win32 windows with GDI, a notepad with resources and dialogs, and OpenGL.
+Example programs (.exe) are in [`pyos/share/pywin/ejemplos`](pyos/share/pywin/ejemplos): a console program, `scanf`, C++ STL and exceptions, threads, a DLL of its own, console colours and the registry, Win32 windows with GDI, a notepad with resources and dialogs, and OpenGL.
 
 **DOOM**: `python tools/doom.py` builds a Windows x64 `doom.exe` from [doomgeneric](https://github.com/ozkl/doomgeneric) (id Software's GPL source) and downloads the shareware episode from the [Internet Archive](https://archive.org/details/DoomsharewareEpisode). Neither file is kept in this repository. Then build with `PYOS_EXTRA=build/extra python tools/build.py --fs`.
 

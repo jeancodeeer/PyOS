@@ -4,22 +4,13 @@ from pywin.dlls import Dll
 
 dll = Dll("shell32")
 
-# CSIDL numbers -> folders of the SnakeyOS disk (C:\ is /disk)
-FOLDERS = {0x00: "Escritorio", 0x10: "Escritorio", 0x05: "Documentos", 0x0D: "Musica", 0x27: "Imagenes",
-           0x1A: "AppData", 0x1C: "AppData", 0x23: "AppData", 0x28: "", 0x26: "Programas", 0x24: "Windows",
-           0x25: "Windows"}
+# CSIDL numbers -> folders of the SnakeyOS disk (C:\ is /disk): pywin/winpaths.py
 
 
 def _folder(csidl):
-    import os
-    name = FOLDERS.get(csidl & 0xFF, "")
-    path = "/disk/" + name if name else "/disk"
-    try:
-        os.mkdir(path)
-    except OSError:
-        pass
-    from pywin.process import to_windows
-    return to_windows(path)
+    from pywin import winpaths
+    path = winpaths.folder(csidl)
+    return winpaths.windows(path if path is not None else "/disk")
 
 
 @dll(5)
@@ -234,6 +225,17 @@ def DragFinish(p, drop):
     p.handles.pop(drop, None)
 
 
-@dll(2)
-def SHGetKnownFolderPath(p, folder_id, flags):
-    return E_FAIL
+@dll(4)
+def SHGetKnownFolderPath(p, folder_id, flags, token, out):
+    """The path of a known folder, in memory the program frees with CoTaskMemFree."""
+    from pywin import winpaths
+    path = winpaths.known_folder(winpaths.guid_text(folder_id)) if folder_id else None
+    if path is None:
+        if out:
+            mem.put64(out, 0)
+        return E_FAIL
+    text = winpaths.windows(path)
+    block = p.heap.alloc(2 * len(text) + 2)
+    mem.put_wstr(block, text)
+    mem.put64(out, block)
+    return 0

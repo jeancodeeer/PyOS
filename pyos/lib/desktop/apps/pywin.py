@@ -45,86 +45,183 @@ def check(path):
 
 class PyWin(App):
     title = "PyWin"
-    size = (760, 470)
+    size = (800, 500)
 
     def __init__(self, win, path=None):
         App.__init__(self, win)
         self.form = ui.Form()
-        self.list = self.form.add(ui.ListBox((12, 64, LIST_W, 330), [], self.pick, self.run_selected, row_h=28))
-        self.form.add(ui.Button((12, 404, 140, 34), "Ejecutar", self.run_selected, primary=True))
-        self.form.add(ui.Button((160, 404, 152, 34), "Abrir otro...", self.ask_path))
+        self.list = self.form.add(ui.ListBox((12, 64, LIST_W, 360), [], self.pick, self.run_selected, row_h=28))
+        y = 434
+        self.form.add(ui.Button((12, y, 96, 34), "Abrir", self.run_selected, primary=True))
+        self.form.add(ui.Button((114, y, 96, 34), "Instalar...", self.ask_install))
+        self.form.add(ui.Button((216, y, 96, 34), "Desinstalar", self.uninstall_selected))
         self.details = None
+        self.message = ""
+        from pywin import install
+        install.on_change(lambda: self.win and self.refresh())
         self.refresh()
         if path:
-            self.run(path)
+            if path.lower().endswith((".zip", ".msi")) or install.is_installer(path):
+                self.install(path)
+            else:
+                self.run(path)
 
     def refresh(self):
-        self.paths = find_programs()
-        self.list.set_items([(p.rsplit("/", 1)[-1], p, p.rsplit("/", 2)[-2]) for p in self.paths])
+        from pywin import install
+        try:
+            links = install.shortcuts()
+            progs = install.programs()
+        except Exception as e:
+            links, progs = [], []
+            self.message = "No se pudo leer lo instalado: %s" % e
+        self.entries = []
+        for s in links:
+            prog = None
+            for pr in progs:
+                if pr["location"] and s["target"].lower().startswith(_host(pr["location"]).lower()):
+                    prog = pr
+            self.entries.append(("app", s, prog))
+        covered = set(id(e[2]) for e in self.entries if e[2])
+        for pr in progs:
+            if id(pr) not in covered:
+                self.entries.append(("prog", None, pr))
+        for p in find_programs():
+            self.entries.append(("exe", p, None))
+        items = []
+        for kind, a, b in self.entries:
+            if kind == "app":
+                items.append((a["name"], a["target"], "Instalado"))
+            elif kind == "prog":
+                items.append((b["name"], b["location"], "Instalado"))
+            else:
+                items.append((a.rsplit("/", 1)[-1], a, a.rsplit("/", 2)[-2]))
+        self.list.set_items(items)
         self.pick()
+        self.redraw()
 
     def pick(self, item=None):
-        if 0 <= self.list.selected < len(self.paths):
-            path = self.paths[self.list.selected]
+        e = self.entry()
+        self.details = None
+        if e and e[0] == "exe":
             try:
-                self.details = (path, check(path))
-            except Exception as e:
-                self.details = (path, {"error": str(e)})
+                self.details = (e[1], check(e[1]))
+            except Exception as ex:
+                self.details = (e[1], {"error": str(ex)})
 
-    def selected(self):
+    def entry(self):
         i = self.list.selected
-        return self.paths[i] if 0 <= i < len(self.paths) else None
+        return self.entries[i] if 0 <= i < len(self.entries) else None
 
     def run_selected(self, *args):
-        path = self.selected()
-        if path:
-            self.run(path)
+        e = self.entry()
+        if not e:
+            return
+        from pywin import install
+        if e[0] == "app":
+            install.launch(e[1])
+        elif e[0] == "exe":
+            if install.is_installer(e[1]):
+                self.install(e[1])
+            else:
+                self.run(e[1])
 
     def run(self, path):
         from pywin import host
         host.start(path)
 
-    def ask_path(self):
-        ui.ask("Abrir un programa de Windows", "Ruta del .exe:", "/disk/Descargas/",
-               lambda p: self.run(p) if p.lower().endswith(".exe") else ui.toast("no es un .exe"))
+    def ask_install(self):
+        ui.ask("Instalar un programa de Windows", "Instalador (.exe), programa portable (.zip) o .exe:",
+               "/disk/Descargas/", self.install)
+
+    def install(self, path):
+        from pywin import install
+        self.message = "Instalando %s..." % path.rsplit("/", 1)[-1]
+        self.redraw()
+
+        def done(ok, msg):
+            self.message = msg
+            ui.toast(msg)
+            self.refresh()
+        install.install(path, done)
+
+    def uninstall_selected(self):
+        e = self.entry()
+        prog = e[2] if e else None
+        if prog is None:
+            ui.toast("Elige un programa instalado")
+            return
+        from pywin import install
+
+        def go():
+            def done(ok, msg):
+                self.message = msg
+                ui.toast(msg)
+                self.refresh()
+            install.uninstall(prog, done)
+        ui.confirm("Desinstalar", "Desinstalar %s?" % prog["name"], go)
 
     def draw(self, surf):
         surf.fill(T.WIN_BG)
-        surf.blit(icons.icon("pywin", 40), (12, 12))
-        ui.text(surf, "PyWin", 62, 12, T.TEXT, ui.font(18, bold=True))
-        ui.text(surf, "Programas de Windows (x64) en SnakeyOS: su codigo corre en el procesador; Windows es Python.",
-                62, 36, T.MUTED, ui.font(11), self.win.w - 80)
+        surf.blit(icons.icon("pywin", 44), (12, 10))
+        ui.text(surf, "PyWin", 66, 12, T.TEXT, ui.font(18, bold=True))
+        ui.text(surf, "Programas de Windows (x64) en SnakeyOS: se instalan en C:\\Program Files y se abren desde "
+                      "el lanzador.", 66, 36, T.MUTED, ui.font(11), self.win.w - 80)
         self.form.draw(surf)
         x = LIST_W + 32
-        if not self.paths:
-            ui.text(surf, "No hay archivos .exe en Escritorio, Descargas, Documentos ni USB.", x, 70, T.MUTED)
+        w = self.win.w - x - 12
+        if self.message:
+            ui.text(surf, self.message, x, self.win.h - 30, T.MUTED, ui.font(12), w)
+        e = self.entry()
+        if not e:
+            ui.text(surf, "No hay programas instalados ni archivos .exe en Escritorio, Descargas o Documentos.",
+                    x, 70, T.MUTED, max_w=w)
+            return
+        kind, a, prog = e
+        y = 70
+        if kind in ("app", "prog"):
+            name = a["name"] if kind == "app" else prog["name"]
+            surf.blit(icons.icon("exe", 56), (x, y))
+            ui.text(surf, name, x + 70, y + 6, T.TEXT, ui.font(16, bold=True), w - 70)
+            ui.text(surf, "Instalado", x + 70, y + 30, (40, 130, 70), ui.font(12))
+            y += 74
+            rows = []
+            if kind == "app":
+                rows.append(("Programa", _win(a["target"])))
+            if prog:
+                for label, key in (("Editor", "publisher"), ("Version", "version"), ("Carpeta", "location")):
+                    if prog.get(key):
+                        rows.append((label, prog[key]))
+            for label, value in rows:
+                ui.text(surf, label, x, y, T.MUTED)
+                ui.text(surf, value, x + 100, y, T.TEXT, max_w=w - 100)
+                y += 24
             return
         if not self.details:
             return
         path, d = self.details
-        y = 70
-        ui.text(surf, path.rsplit("/", 1)[-1], x, y, T.TEXT, ui.font(15, bold=True), self.win.w - x - 12)
+        ui.text(surf, path.rsplit("/", 1)[-1], x, y, T.TEXT, ui.font(15, bold=True), w)
         y += 26
-        ui.text(surf, path, x, y, T.MUTED, ui.font(11), self.win.w - x - 12)
+        ui.text(surf, path, x, y, T.MUTED, ui.font(11), w)
         y += 26
         if "error" in d:
-            ui.text(surf, "No es un programa que PyWin pueda abrir: " + d["error"], x, y, (200, 60, 60),
-                    max_w=self.win.w - x - 12)
+            ui.text(surf, "No es un programa que PyWin pueda abrir: " + d["error"], x, y, (200, 60, 60), max_w=w)
             return
-        rows = [("Tipo", "programa de consola" if d["console"] else "programa con ventanas"),
+        from pywin import install
+        rows = [("Tipo", "instalador" if install.is_installer(path) else
+                 ("programa de consola" if d["console"] else "programa con ventanas")),
                 ("Tamano", "%d KB" % (d["size"] // 1024)),
                 ("DLL", ", ".join(d["dlls"])),
                 ("Funciones", "%d de Windows" % d["imports"])]
         for label, value in rows:
             ui.text(surf, label, x, y, T.MUTED)
-            ui.text(surf, value, x + 100, y, T.TEXT, max_w=self.win.w - x - 112)
+            ui.text(surf, value, x + 100, y, T.TEXT, max_w=w - 100)
             y += 24
         y += 8
         if d["missing"]:
             ui.text(surf, "Le faltan %d funciones (devolveran 0):" % len(d["missing"]), x, y, (200, 120, 30))
             y += 22
-            for name in d["missing"][:9]:
-                ui.text(surf, "  " + name, x, y, T.MUTED, ui.font(11), self.win.w - x - 12)
+            for name in d["missing"][:7]:
+                ui.text(surf, "  " + name, x, y, T.MUTED, ui.font(11), w)
                 y += 17
         else:
             pygame.draw.circle(surf, (60, 170, 90), (x + 8, y + 9), 8)
@@ -132,3 +229,13 @@ class PyWin(App):
 
     def event(self, ev, pos):
         return self.form.event(ev, pos)
+
+
+def _host(win_path):
+    from pywin.process import to_host
+    return to_host(win_path)
+
+
+def _win(path):
+    from pywin.process import to_windows
+    return to_windows(path)

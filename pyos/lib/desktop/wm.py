@@ -191,7 +191,8 @@ class WindowManager:
         from pyos import config
         self.wall_index = config.get("wallpaper", 0)
         cached = globals().get("_cached_wallpaper")
-        self.wallpaper = cached if cached is not None and self.wall_index == 0 else wallpaper(self.wall_index)
+        self.wallpaper = cached if cached is not None and self.wall_index == 0 and \
+            cached.get_size() == tuple(T.SCREEN) else wallpaper(self.wall_index)
         self.dialog = None                 # a modal Dialog on top of everything
         self.last_input = time.ticks_ms()  # for turning the screen off when nobody uses it
         self.screen_off = False
@@ -363,8 +364,22 @@ class WindowManager:
     def draw(self):
         scr = self.screen
         scr.blit(self.wallpaper, (0, 0))
+        if self.launcher:                               # the launcher alone, on the wallpaper
+            self.draw_top_bar(scr, None)
+            self.launcher.draw(scr)
+            if self.menu:
+                self.menu.draw(scr)
+            self.draw_toast(scr)
+            self.draw_night_light(scr)
+            pygame.display.flip()
+            self.dirty = False
+            return
         if _setting("iconos_escritorio"):
             self.icons.draw(scr)
+        try:
+            self.draw_widgets(scr)
+        except Exception as e:
+            print("widgets:", repr(e))
         top = self.top()
         for win in self.windows:
             if win.minimized:
@@ -528,30 +543,77 @@ class WindowManager:
             for i in (4, 8):
                 pygame.draw.line(scr, (170, 174, 184), (gx + i, gy + 10), (gx + 10, gy + i))
 
+    # ---- the top bar: logo, SnakeyOS, menus, status icons, date ----
+    MENUS = ("Archivo", "Editar", "Ver", "Ventana", "Ayuda")
+
+    def top_menu_rects(self):
+        fb, f = ui.font(14, bold=True), ui.font(14)
+        x = 40 + ui.width("SnakeyOS", fb) + 22
+        out = []
+        for title in self.MENUS:
+            w = ui.width(title, f) + 22
+            out.append((title, pygame.Rect(x - 11, 2, w, T.TOP_H - 4)))
+            x += w
+        return out
+
+    def top_menu(self, title, rect):
+        top = self.top()
+        if title == "Archivo":
+            items = [("Nueva ventana de Archivos", lambda: self.launch("files")),
+                     ("Abrir Terminal", lambda: self.launch("terminal")), None,
+                     ("Cerrar ventana", (lambda: self.close(top)) if top else (lambda: None))]
+        elif title == "Editar":
+            items = [("Configuracion", lambda: self.launch("settings")),
+                     ("Cambiar el fondo", self.next_wallpaper)]
+        elif title == "Ver":
+            items = [("Todas las aplicaciones", self.open_launcher),
+                     ("Monitor del sistema", lambda: self.launch("sysmon"))]
+        elif title == "Ventana":
+            items = []
+            for w in reversed(self.windows):
+                items.append((w.title[:40], (lambda w=w: (setattr(w, "minimized", False), self.focus(w)))))
+            if not items:
+                items = [("No hay ventanas abiertas", lambda: None)]
+            elif top:
+                items += [None, ("Minimizar", lambda: setattr(top, "minimized", True)),
+                          ("Maximizar", top.toggle_maximize)]
+        else:
+            items = [("Acerca de SnakeyOS", lambda: self.launch("about")),
+                     ("Buscar actualizaciones", lambda: self.launch("updates"))]
+        self.context_menu((rect.x, T.TOP_H + 2), items)
+
     def draw_top_bar(self, scr, top):
         sw = T.SCREEN[0]
-        scr.blit(_panel(sw, T.TOP_H, 0), (0, 0))
-        f, fb = ui.font(13), ui.font(13, bold=True)
+        scr.blit(_glass(sw, T.TOP_H, 0, 150), (0, 0))
+        f, fb = ui.font(14), ui.font(14, bold=True)
+        ink = (20, 30, 48)
         y = (T.TOP_H - f.get_height()) // 2
         from pyos import logo
-        scr.blit(logo.surface(20), (8, (T.TOP_H - 20) // 2))
-        ui.text(scr, "SnakeyOS", 34, y, T.PANEL_TEXT, fb)
-        if top is not None:
-            ui.text(scr, top.title, 34 + ui.width("SnakeyOS", fb) + 16, y, (70, 86, 112), f, 300)
+        scr.blit(icons.icon("about", 22) if False else logo.surface(22), (12, (T.TOP_H - 22) // 2))
+        ui.text(scr, "SnakeyOS", 40, y, ink, fb)
+        for title, r in self.top_menu_rects():
+            if r.collidepoint(self.mouse):
+                pygame.draw.rect(scr, (255, 255, 255, 120) if False else (232, 238, 248), r, 0, 6)
+            ui.text(scr, title, r.x + 11, y, ink, f)
         t = time.localtime()
-        days = ("lun", "mar", "mie", "jue", "vie", "sab", "dom")
+        days = ("Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom")
+        months = ("Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
         if _setting("reloj_24h") is False:
             clock = "%d:%02d %s" % ((t[3] % 12) or 12, t[4], "p. m." if t[3] >= 12 else "a. m.")
         else:
             clock = "%02d:%02d" % (t[3], t[4])
-        ui.text(scr, "%s %d  %s" % (days[t[6]], t[2], clock), sw // 2, y, T.PANEL_TEXT, fb, center=True)
-        x = sw - 12
-        for label in (_net_label(), _ram_label(), _sound_label()):
-            if label:
-                x -= ui.width(label, f)
-                ui.text(scr, label, x, y, (52, 68, 96), f)
-                x -= 18
+        date = "%s %d %s  %s" % (days[t[6]], t[2], months[t[1] - 1], clock)
+        x = sw - 14 - ui.width(date, f)
+        ui.text(scr, date, x, y, ink, f)
+        cy = T.TOP_H // 2
+        x -= 34
+        _battery_glyph(scr, x, cy, ink)
+        x -= 30
+        _speaker_glyph(scr, x, cy, ink, bool(_sound_label()))
+        x -= 30
+        _wifi_glyph(scr, x, cy, ink, _net_label().startswith("red"))
 
+    # ---- the dock: glass, big icons ----
     def dock_items(self):
         from desktop import apps
         names = list(apps.DOCK)
@@ -562,34 +624,149 @@ class WindowManager:
 
     def dock_rects(self):
         names = self.dock_items()
-        size, gap = 44, 10
-        total = len(names) * (size + gap) - gap + 24
+        size, gap = 56, 16
+        total = len(names) * (size + gap) - gap + 40
         x0 = (T.SCREEN[0] - total) // 2
-        y = T.SCREEN[1] - T.DOCK_H + (T.DOCK_H - size) // 2 - 2
-        panel = pygame.Rect(x0, y - 8, total, size + 16)
-        return panel, [(n, pygame.Rect(x0 + 12 + i * (size + gap), y, size, size)) for i, n in enumerate(names)]
+        y = T.SCREEN[1] - T.DOCK_H + (T.DOCK_H - size) // 2 - 4
+        panel = pygame.Rect(x0, y - 12, total, size + 24)
+        return panel, [(n, pygame.Rect(x0 + 20 + i * (size + gap), y, size, size)) for i, n in enumerate(names)]
 
     def draw_dock(self, scr):
         panel, items = self.dock_rects()
-        scr.blit(_panel(panel.w, panel.h, 16), panel.topleft)
+        scr.blit(_glass(panel.w, panel.h, 26, 120), panel.topleft)
         from desktop import apps
         running = {w.name for w in self.windows}
         hovered = None
         for name, r in items:
             if r.collidepoint(self.mouse):
                 hovered = (name, r)
-                scr.blit(icons.icon(apps.icon_name(name), 52, apps.label(name)), (r.x - 4, r.y - 8))   # grows under the mouse
+                scr.blit(icons.icon(apps.icon_name(name), 64, apps.label(name)), (r.x - 4, r.y - 10))
             else:
-                scr.blit(icons.icon(apps.icon_name(name), 44, apps.label(name)), r.topleft)
+                scr.blit(icons.icon(apps.icon_name(name), 56, apps.label(name)), r.topleft)
             if name in running:
-                pygame.draw.circle(scr, T.ACCENT, (r.centerx, r.bottom + 6), 2)
+                pygame.draw.rect(scr, (250, 252, 255), (r.centerx - 7, r.bottom + 5, 14, 3), 0, 2)
         if hovered:
             label = apps.label(hovered[0])
             f = ui.font(13)
-            w = ui.width(label, f) + 20
-            y = panel.y - 34
-            scr.blit(_panel(w, 26, 8), (hovered[1].centerx - w // 2, y))
+            w = ui.width(label, f) + 22
+            y = panel.y - 36
+            scr.blit(_glass(w, 26, 9, 200), (hovered[1].centerx - w // 2, y))
             ui.text(scr, label, hovered[1].centerx, y + 5, T.PANEL_TEXT, f, center=True)
+
+    # ---- widgets on the right: clock, music, CPU / RAM / disk ----
+    def widget_rects(self):
+        sw, sh = T.SCREEN
+        if sw < 1000 or sh < 600 or not _setting("iconos_escritorio"):
+            return None
+        x, w = sw - 26 - 272, 272
+        y = T.TOP_H + 26
+        clock = pygame.Rect(x, y, w, 140)
+        music = pygame.Rect(x, clock.bottom + 16, w, 150)
+        stats = pygame.Rect(x, music.bottom + 16, w, 122)
+        if stats.bottom > sh - T.DOCK_H - 10:
+            return None
+        return clock, music, stats
+
+    def music_app(self):
+        for w in self.windows:
+            if w.name == "music" and w.app is not None:
+                return w.app
+        return None
+
+    def music_buttons(self, music):
+        cy = music.bottom - 34
+        return [("prev", pygame.Rect(music.centerx - 78, cy - 16, 36, 32)),
+                ("play", pygame.Rect(music.centerx - 18, cy - 16, 36, 32)),
+                ("next", pygame.Rect(music.centerx + 42, cy - 16, 36, 32))]
+
+    def draw_widgets(self, scr):
+        rects = self.widget_rects()
+        if rects is None:
+            return
+        clock, music, stats = rects
+        white, soft = (255, 255, 255), (236, 242, 252)
+        # the clock
+        scr.blit(_glass(clock.w, clock.h, 26, 95), clock.topleft)
+        t = time.localtime()
+        days = ("Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo")
+        months = ("Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre",
+                  "Octubre", "Noviembre", "Diciembre")
+        big = ui.font(56)
+        ui.text(scr, "%02d:%02d" % (t[3], t[4]), clock.centerx, clock.y + 20, white, big, center=True)
+        ui.text(scr, "%s, %d de %s" % (days[t[6]], t[2], months[t[1] - 1]), clock.centerx, clock.y + 96, soft,
+                ui.font(16), center=True)
+        # music
+        scr.blit(_glass(music.w, music.h, 26, 95), music.topleft)
+        app = self.music_app()
+        title, artist, playing = "Nada sonando", "Abre Musica para escuchar", False
+        if app is not None:
+            try:
+                cur = getattr(app, "song", None)
+                name = getattr(cur, "title", None) if cur is not None else None
+                if name:
+                    title = name.rsplit(".", 1)[0]
+                    artist = "Musica"
+                playing = bool(cur is not None and getattr(cur, "playing", False))
+            except Exception:
+                pass
+        art = pygame.Rect(music.x + 20, music.y + 20, 70, 70)
+        scr.blit(icons.icon("music", 72), (art.x - 1, art.y - 1))
+        ui.text(scr, title, art.right + 16, art.y + 6, white, ui.font(16, bold=True), music.right - art.right - 30)
+        ui.text(scr, artist, art.right + 16, art.y + 34, soft, ui.font(14), music.right - art.right - 30)
+        for kind, r in self.music_buttons(music):
+            cx, cy = r.center
+            if kind == "play":
+                if playing:
+                    pygame.draw.rect(scr, white, (cx - 8, cy - 10, 6, 20), 0, 2)
+                    pygame.draw.rect(scr, white, (cx + 2, cy - 10, 6, 20), 0, 2)
+                else:
+                    pygame.draw.polygon(scr, white, [(cx - 7, cy - 11), (cx - 7, cy + 11), (cx + 11, cy)])
+            else:
+                d = -1 if kind == "prev" else 1
+                pygame.draw.polygon(scr, white, [(cx - 6 * d, cy - 9), (cx - 6 * d, cy + 9), (cx + 6 * d, cy)])
+                pygame.draw.rect(scr, white, (cx + 6 * d - (2 if d > 0 else 0), cy - 9, 3, 18))
+        # CPU, RAM, disk
+        scr.blit(_glass(stats.w, stats.h, 26, 95), stats.topleft)
+        rows = (("CPU", self.cpu_load), ("RAM", _ram_share()), ("Disco", _disk_share()))
+        f = ui.font(15)
+        for k, (label, share) in enumerate(rows):
+            yy = stats.y + 20 + k * 32
+            ui.text(scr, label, stats.x + 20, yy, white, f)
+            bar = pygame.Rect(stats.x + 82, yy + 6, 128, 8)
+            pygame.draw.rect(scr, (255, 255, 255, 90) if False else (196, 210, 232), bar, 0, 4)
+            fill = bar.copy()
+            fill.w = max(6, int(bar.w * max(0.0, min(1.0, share))))
+            pygame.draw.rect(scr, white, fill, 0, 4)
+            ui.text(scr, "%d%%" % int(share * 100 + 0.5), stats.right - 20 - ui.width("100%", f), yy, white, f)
+
+    def widget_click(self, pos):
+        rects = self.widget_rects()
+        if rects is None:
+            return False
+        clock, music, stats = rects
+        if clock.collidepoint(pos):
+            self.launch("clock")
+            return True
+        if stats.collidepoint(pos):
+            self.launch("sysmon")
+            return True
+        if music.collidepoint(pos):
+            app = self.music_app()
+            for kind, r in self.music_buttons(music):
+                if r.collidepoint(pos):
+                    if app is None:
+                        self.launch("music")
+                    else:
+                        try:
+                            {"prev": app.previous, "play": app.toggle, "next": app.next}[kind]()
+                        except Exception as e:
+                            self.error(e)
+                    self.dirty = True
+                    return True
+            if app is None:
+                self.launch("music")
+            return True
+        return False
 
     def subtitle(self, text, ms=3500):
         """A line of text at the bottom of the screen, above the dock, for a while."""
@@ -720,8 +897,13 @@ class WindowManager:
     def mouse_down(self, ev):
         pos = ev.pos
         if pos[1] < T.TOP_H:
-            if pos[0] < 100:
+            if pos[0] < 36 + ui.width("SnakeyOS", ui.font(14, bold=True)):
                 self.open_launcher()
+                return
+            for title, r in self.top_menu_rects():
+                if r.collidepoint(pos):
+                    self.top_menu(title, r)
+                    return
             return
         panel, items = self.dock_rects()
         if panel.collidepoint(pos):
@@ -730,6 +912,8 @@ class WindowManager:
                     self.dock_click(name)
             return
         win = self.window_at(pos)
+        if win is None and ev.button == 1 and self.widget_click(pos):
+            return
         if win is None:                                 # the desktop itself: its icons
             self.desktop_focus = True
             self.icons.mouse_down(ev)
@@ -1020,6 +1204,82 @@ def _panel(w, h, radius):
     return p
 
 
+def _glass(w, h, radius, alpha):
+    """Liquid glass: a light, see-through rounded panel with a bright rim and a soft top sheen."""
+    key = ("g", w, h, radius, alpha)
+    p = _panels.get(key)
+    if p is None:
+        if len(_panels) > 40:
+            _panels.clear()
+        p = pygame.Surface((w, h), SRCALPHA)
+        p.fill((0, 0, 0, 0))
+        pygame.draw.rect(p, (246, 249, 255, alpha), (0, 0, w, h), 0, radius)
+        sheen = pygame.Surface((w, max(1, h // 2)), SRCALPHA)
+        sheen.fill((0, 0, 0, 0))
+        pygame.draw.rect(sheen, (255, 255, 255, 40), (0, 0, w, h // 2 + radius), 0, radius)
+        p.blit(sheen, (0, 0))
+        if radius:
+            pygame.draw.rect(p, (255, 255, 255, 200), (0, 0, w, h), 1, radius)
+        else:
+            pygame.draw.line(p, (255, 255, 255, 160), (0, h - 1), (w, h - 1))
+        _panels[key] = p
+    return p
+
+
+def _wifi_glyph(scr, x, cy, ink, on):
+    import math as _m
+    col = ink if on else (140, 150, 166)
+    for k, r in enumerate((11, 7, 3)):
+        rect = pygame.Rect(x - r, cy + 4 - r, 2 * r, 2 * r)
+        if k < 2:
+            pygame.draw.arc(scr, col, rect, _m.pi * 0.25, _m.pi * 0.75, 2)
+    pygame.draw.circle(scr, col, (x, cy + 3), 2)
+
+
+def _speaker_glyph(scr, x, cy, ink, on):
+    import math as _m
+    col = ink if on else (140, 150, 166)
+    pygame.draw.rect(scr, col, (x - 8, cy - 3, 4, 7))
+    pygame.draw.polygon(scr, col, [(x - 4, cy - 3), (x + 1, cy - 8), (x + 1, cy + 9), (x - 4, cy + 4)])
+    if on:
+        pygame.draw.arc(scr, col, (x - 2, cy - 5, 10, 12), -_m.pi / 3, _m.pi / 3, 2)
+        pygame.draw.arc(scr, col, (x - 4, cy - 9, 16, 20), -_m.pi / 3, _m.pi / 3, 2)
+
+
+def _battery_glyph(scr, x, cy, ink):
+    pygame.draw.rect(scr, ink, (x - 12, cy - 6, 22, 12), 1, 3)
+    pygame.draw.rect(scr, ink, (x + 10, cy - 2, 2, 5))
+    pygame.draw.rect(scr, ink, (x - 10, cy - 4, 16, 8), 0, 2)
+
+
+def _ram_share():
+    try:
+        from kernel import mm
+        st = mm.stats()
+        return (st["total"] - st["free"]) / float(st["total"] or 1)
+    except Exception:
+        import gc
+        free, used = gc.mem_free(), gc.mem_alloc()
+        return used / float(free + used or 1)
+
+
+_disk = {"at": 0, "v": 0.0}
+
+
+def _disk_share():
+    now = time.ticks_ms()
+    if time.ticks_diff(now, _disk["at"]) > 10000 or not _disk["at"]:
+        try:
+            import os
+            st = os.statvfs("/disk")
+            total, free = st[2] * st[0], st[3] * st[0]
+            _disk["v"] = (total - free) / float(total or 1)
+        except Exception:
+            _disk["v"] = 0.0
+        _disk["at"] = now
+    return _disk["v"]
+
+
 WALLPAPERS = [                     # (top colour, bottom colour, glow colours)
     ((24, 62, 118), (250, 214, 110), ((255, 232, 140), (70, 130, 210), (255, 244, 200))),   # SnakeyOS: Python blue and yellow
     ((236, 240, 246), (255, 240, 196), ((255, 222, 115), (120, 170, 230), (255, 255, 255))),   # light, minimal
@@ -1044,6 +1304,23 @@ def _wallpaper_pictures():
     return out
 
 
+_default = {}
+
+
+def _default_wallpaper():
+    """SnakeyOS's wallpaper (/share/images/snakeyos.jpg): blue and yellow waves and the logo."""
+    img = _default.get("img")
+    if img is None:
+        try:
+            from imaging import load
+            with open("/share/images/snakeyos.jpg", "rb") as f:
+                img = load(f.read())
+            _default["img"] = img
+        except Exception:
+            return None
+    return img
+
+
 def wallpaper_count():
     return len(WALLPAPERS) + len(_wallpaper_pictures())
 
@@ -1054,6 +1331,10 @@ def wallpaper(index=0):
     w, h = T.SCREEN
     pictures = _wallpaper_pictures()
     index %= len(WALLPAPERS) + len(pictures)
+    if index == 0:
+        img = _default_wallpaper()
+        if img is not None:
+            return img if img.get_size() == (w, h) else pygame.transform.scale(img, (w, h))
     if index >= len(WALLPAPERS):
         try:
             from imaging import load

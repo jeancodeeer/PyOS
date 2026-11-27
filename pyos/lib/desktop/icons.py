@@ -42,11 +42,43 @@ def _tile(s, size, top, bottom):
         s.fill(c + (255,), (inset, y, size - 2 * inset, 1))
 
 
+PACK = "/share/icons"
+PACK_SIZES = (20, 32, 44, 52, 56, 64, 72, 96)
+ALIASES = {"folder": "files", "home": "files"}
+
+
+def _from_pack(name, size):
+    """The icon from the SnakeyOS icon pack (/share/icons/<name>-<size>.png), or None."""
+    name = ALIASES.get(name, name)
+    if not name:
+        return None
+    best = None
+    for s in PACK_SIZES:
+        if s >= size:
+            best = s
+            break
+    if best is None:
+        best = PACK_SIZES[-1]
+    try:
+        img = pygame.image.load("%s/%s-%d.png" % (PACK, name, best))
+    except (OSError, Exception):
+        return None
+    if best != size:
+        img = pygame.transform.scale(img, (size, size))
+    return img
+
+
 def icon(name, size=48, label=None):
     """The icon called `name`; unknown names get a tile with the label's first letter."""
     key = (name, size, label)
     if key in _cache:
         return _cache[key]
+    img = _from_pack(name, size)
+    if img is not None:
+        if len(_cache) > 300:
+            _cache.clear()
+        _cache[key] = img
+        return img
     s = pygame.Surface((size, size), SRCALPHA)
     s.fill((0, 0, 0, 0))
     top, bottom = COLORS.get(name, ((120, 120, 140), (80, 80, 100)))

@@ -504,24 +504,26 @@ def FormatMessageW(p, flags, source, msg_id, lang, buf, size, args):
 
 @dll(3)
 def ExpandEnvironmentStringsW(p, src, dst, size):
-    text = mem.wstr(src) or ""
-    for name, value in (("%USERPROFILE%", "C:\\"), ("%APPDATA%", "C:\\AppData"), ("%TEMP%", "C:\\Temp"),
-                        ("%TMP%", "C:\\Temp"), ("%WINDIR%", "C:\\Windows"), ("%SYSTEMROOT%", "C:\\Windows"),
-                        ("%PROGRAMFILES%", "C:\\Programas"), ("%LOCALAPPDATA%", "C:\\AppData")):
-        i = text.upper().find(name)
-        while i >= 0:
-            text = text[:i] + value + text[i + len(name):]
-            i = text.upper().find(name)
+    from pywin import winpaths
+    text = winpaths.expand(mem.wstr(src) or "")
     if size > len(text):
         mem.put_wstr(dst, text)
     return len(text) + 1
 
 
 @dll(3)
+def ExpandEnvironmentStringsA(p, src, dst, size):
+    from pywin import winpaths
+    text = winpaths.expand(mem.cstr(src) or "")
+    if size > len(text):
+        mem.put_cstr(dst, text)
+    return len(text) + 1
+
+
+@dll(3)
 def GetEnvironmentVariableW(p, name, buf, size):
-    values = {"USERPROFILE": "C:\\", "APPDATA": "C:\\AppData", "TEMP": "C:\\Temp", "TMP": "C:\\Temp",
-              "WINDIR": "C:\\Windows", "SYSTEMROOT": "C:\\Windows", "LOCALAPPDATA": "C:\\AppData"}
-    value = values.get((mem.wstr(name) or "").upper())
+    from pywin import winpaths
+    value = winpaths.environment().get((mem.wstr(name) or "").upper())
     if value is None:
         p.last_error = 203                                  # ERROR_ENVVAR_NOT_FOUND
         return 0
