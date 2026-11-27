@@ -46,17 +46,13 @@ JS_C = js/quickjs/quickjs.c js/quickjs/libregexp.c js/quickjs/libunicode.c js/qu
 	js/quickjs/dtoa.c js/shim.c
 
 SRC_C = \
-	mphal.c \
-	modkernel.c \
 	modmedia.c \
 	arena.c \
 	modjs.c \
 	$(JS_C) \
 	$(MEDIA_C) \
-	mpthread.c \
 	shared/libc/printf.c \
 	shared/libc/string0.c \
-	readline.c \
 	shared/runtime/pyexec.c \
 	shared/runtime/stdout_helpers.c \
 	shared/runtime/interrupt_char.c \
@@ -66,8 +62,7 @@ SRC_C = \
 	$(SRC_LIB_LIBM_DBL_C) \
 	$(SRC_LIB_LIBM_DBL_SQRT_SW_C) \
 
-SRC_QSTR += mphal.c modkernel.c modmedia.c modjs.c mpthread.c \
-	readline.c \
+SRC_QSTR += modmedia.c modjs.c \
 	shared/runtime/pyexec.c \
 	shared/runtime/sys_stdio_mphal.c \
 

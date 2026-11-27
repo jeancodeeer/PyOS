@@ -17,6 +17,7 @@ rustflags = [
     "-C", "relocation-model=pie",
     "-C", "link-arg=-pie",
     "-C", "link-arg=--no-dynamic-linker",
+    "-C", "link-arg=-znotext",           # relocations in read-only data too: the loader applies them all
     "-C", "link-arg=-Trust/arm64/linker.ld",
     "-C", "link-arg=-zmax-page-size=0x1000",
     "-C", "link-arg=--gc-sections",
