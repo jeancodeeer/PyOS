@@ -5,13 +5,23 @@
 #
 # A spreadsheet: click a cell, type, Enter. A cell that starts with '='
 # is a Python expression; A1, B2... are the values of other cells, and
-# sum(A1:A5) adds a column. Saved as CSV.
+# sum(A1:A5) adds a column. Saved like Excel does: .xlsx (Excel, LibreOffice
+# and Google Sheets open it, formulas included), and also .csv or .pdf.
 import pygame
 from desktop import theme as T, ui
 from desktop.wm import App as Base
 
 COLS, ROWS = 8, 20
 CW, RH, HEAD = 96, 24, 40
+
+
+def _agg(fn):
+    """max/min that work on a list (A1:A5) or on separate numbers, like Excel's."""
+    def f(*args):
+        vals = args[0] if len(args) == 1 and isinstance(args[0], list) else list(args)
+        nums = [v for v in vals if isinstance(v, (int, float))]
+        return fn(nums) if nums else 0
+    return f
 
 
 def cell_name(c, r):
@@ -22,7 +32,7 @@ class App(Base):
     title = "Hoja de calculo"
     size = (820, 560)
 
-    def __init__(self, win, path="/disk/Documentos/hoja.csv"):
+    def __init__(self, win, path="/disk/Documentos/hoja.xlsx"):
         Base.__init__(self, win)
         self.path = path
         self.cells = {}
@@ -30,33 +40,103 @@ class App(Base):
         self.editing = None
         self.load()
         self.form = ui.Form()
-        self.form.add(ui.Button((self.win.w - 200, 6, 90, 28), "Guardar", self.save, primary=True))
-        self.form.add(ui.Button((self.win.w - 104, 6, 90, 28), "Abrir", self.load))
+        self.form.add(ui.Button((self.win.w - 300, 6, 90, 28), "Guardar", self.save, primary=True))
+        self.form.add(ui.Button((self.win.w - 204, 6, 110, 28), "Guardar como", self.ask_save))
+        self.form.add(ui.Button((self.win.w - 88, 6, 76, 28), "Abrir", self.ask_open))
         self.msg = ""
 
-    def load(self):
-        self.cells = {}
+    # ---- files: .xlsx like Excel, and .csv, .pdf ----
+    def load(self, path=None):
+        from office import excel, files
+        path = path or self.path
         try:
-            with open(self.path) as f:
-                for r, line in enumerate(f):
-                    for c, v in enumerate(line.rstrip("\n").split(",")):
-                        if v:
-                            self.cells[(c, r)] = v.replace("\\x2c", ",")
+            data = files.read(path)
         except OSError:
-            pass
+            return                                        # a new sheet
+        try:
+            if files.ext(path) == "xlsx":
+                self.cells = excel.from_xlsx(data)
+            else:
+                self.cells = excel.from_csv(data.decode())
+        except (ValueError, UnicodeError) as e:
+            self.msg = "no se pudo abrir: %s" % e
+            return
+        self.path = path
+        hidden = [k for k in self.cells if k[0] >= COLS or k[1] >= ROWS]
+        self.msg = ("abierto: %s" % path) + (" (%d celdas fuera de la vista)" % len(hidden) if hidden else "")
+
+    def write(self, path):
+        from office import excel, files
+        kind = files.ext(path)
+        if kind == "xlsx":
+            data = excel.to_xlsx(self.cells, self.value, "Hoja1")
+        elif kind == "pdf":
+            data = self.pdf(path.rsplit("/", 1)[-1])
+        else:
+            data = excel.to_csv(self.cells, self.value)
+        files.write(path, data)
 
     def save(self):
-        import os
-        for d in ("/disk/Documentos",):
-            try:
-                os.mkdir(d)
-            except OSError:
-                pass
-        rows = max([r for _, r in self.cells] + [0]) + 1
-        with open(self.path, "w") as f:
-            for r in range(rows):
-                f.write(",".join(self.cells.get((c, r), "").replace(",", "\\x2c") for c in range(COLS)) + "\n")
-        self.msg = "guardado en " + self.path
+        self.commit()
+        try:
+            self.write(self.path)
+            self.msg = "guardado en " + self.path
+        except OSError as e:
+            self.msg = "no se pudo guardar: %s" % e
+
+    def ask_save(self):
+        from office import files
+
+        def chosen(p):
+            if files.ext(p) not in ("xlsx", "csv", "pdf"):
+                p = files.with_ext(p, "xlsx")
+            if files.ext(p) == "pdf":                      # a PDF is an export: keep editing the sheet
+                self.write(p)
+                self.msg = "exportado: " + p
+                return
+            self.path = p
+            self.save()
+        ui.ask("Guardar como", "Ruta (.xlsx, .csv o .pdf):", self.path, chosen)
+
+    def ask_open(self):
+        ui.ask("Abrir", "Ruta de la hoja (.xlsx o .csv):", self.path, lambda p: self.load(p))
+
+    def pdf(self, title):
+        """The sheet as a table in a PDF (values, not formulas), like Excel's export."""
+        from pyos.printing import PDF, _pdf_string, _info
+        from office import word
+        used = [k for k in self.cells]
+        cols = max([c for c, _ in used] + [0]) + 1
+        rows = max([r for _, r in used] + [0]) + 1
+        cw, rh, left, top = 64, 16, 40, 800
+        pdf = PDF()
+        pages_obj = pdf.reserve()
+        font = pdf.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
+        per_page = (top - 40) // rh
+        kids = []
+        for first in range(0, rows, per_page):
+            out = bytearray(b"0.8 g 0.5 w\n")
+            n = min(per_page, rows - first)
+            for k in range(n + 1):                                 # the grid
+                y = top - k * rh
+                out += b"%d %d m %d %d l S\n" % (left, y, left + cols * cw, y)
+            for c in range(cols + 1):
+                out += b"%d %d m %d %d l S\n" % (left + c * cw, top, left + c * cw, top - n * rh)
+            out += b"0 g\n"
+            for k in range(n):
+                for c in range(cols):
+                    v = self.value(c, first + k) if (c, first + k) in self.cells else ""
+                    s = ("%.6g" % v) if isinstance(v, float) else str(v)
+                    while s and word.text_width(s, 9) > cw - 6:
+                        s = s[:-1]
+                    x = left + c * cw + (cw - 3 - word.text_width(s, 9) if isinstance(v, (int, float)) else 3)
+                    out += b"BT /F1 9 Tf %.1f %d Td " % (x, top - k * rh - 12) + _pdf_string(s) + b" Tj ET\n"
+            stream = pdf.stream("", bytes(out))
+            kids.append(pdf.add("<< /Type /Page /Parent %d 0 R /MediaBox [0 0 595 842] /Contents %d 0 R "
+                                "/Resources << /Font << /F1 %d 0 R >> >> >>" % (pages_obj, stream, font)))
+        pdf.set(pages_obj, "<< /Type /Pages /Kids [%s] /Count %d >>" % (" ".join("%d 0 R" % k for k in kids), len(kids)))
+        root = pdf.add("<< /Type /Catalog /Pages %d 0 R >>" % pages_obj)
+        return pdf.output(root, _info(pdf, title))
 
     def value(self, c, r, depth=0):
         raw = self.cells.get((c, r), "")
@@ -67,7 +147,8 @@ class App(Base):
                 return raw
         if depth > 20:
             return "#ciclo"
-        env = {"sum": self._sum, "max": max, "min": min, "abs": abs, "round": round}
+        env = {"sum": self._sum, "max": _agg(max), "min": _agg(min), "abs": abs, "round": round,
+               "average": lambda v: self._sum(v) / max(1, len([x for x in v if isinstance(x, (int, float))]))}
         for cc in range(COLS):
             for rr in range(ROWS):
                 if cell_name(cc, rr) in raw:

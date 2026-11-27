@@ -5,11 +5,15 @@ import pygame
 from urllib.parse import urljoin, urlsplit, urlencode, quote_plus
 from browser import html, css, layout
 
-USER_AGENT = "PyKernel-Browser/0.2 (Python; bare metal; no JavaScript)"
+USER_AGENT = "SnakeyOS-Navegador/1.0 (PyKernel; Python; sin JavaScript)"
+# what page scripts read in navigator.userAgent: the usual shape, so their browser checks
+# (regular expressions written for real browsers) behave
+JS_USER_AGENT = "Mozilla/5.0 (X11; SnakeyOS x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 SnakeyOS/1.0"
 MAX_BYTES = 3 << 20
 HOME = "about:home"
 
 _font = None
+_sheets = {}               # stylesheet URL or <style> text -> StyleSheet: kept between pages (the same site reuses its CSS)
 
 
 def font():
@@ -26,10 +30,16 @@ body { font-family: sans-serif; margin: 24px; background: #f4f6fa }
 h1 { color: #1d3d78 } .box { background: white; border: 1px solid #c8d0e0; padding: 12px; margin-bottom: 16px }
 a { color: #2456b8 }
 </style></head><body>
-<h1>PyKernel Navegador</h1>
-<p>Un navegador escrito en Python, que corre sobre un sistema operativo escrito en Python.
-HTML, CSS, imagenes (PNG, BMP, GIF, JPEG), formularios, enlaces, pestanas, marcadores e historial. No ejecuta JavaScript.</p>
-<div class="box"><b>Prueba:</b><ul>
+<h1>SnakeyOS Navegador</h1>
+<form action="https://www.google.com/search" method="get" class="box"><b>Google</b>
+<input type="text" name="q" size="40"> <input type="submit" value="Buscar"></form>
+<form action="https://www.youtube.com/results" method="get" class="box"><b>YouTube</b>
+<input type="text" name="search_query" size="40"> <input type="submit" value="Buscar videos"></form>
+<p>Escribe en la barra de direcciones para buscar en Google. HTML, CSS, imagenes (PNG, BMP, GIF, JPEG),
+formularios, pestanas, marcadores, historial y descargas. No ejecuta JavaScript: Google y YouTube se muestran
+en una version sencilla hecha por el navegador (los videos no se reproducen).</p>
+<div class="box"><b>Sitios:</b><ul>
+<li><a href="https://www.google.com/">Google</a> - <a href="https://www.youtube.com/">YouTube</a></li>
 <li><a href="https://example.com/">example.com</a></li>
 <li><a href="https://en.wikipedia.org/wiki/Python_(programming_language)">Wikipedia: Python</a></li>
 <li><a href="https://lite.duckduckgo.com/lite/">DuckDuckGo Lite (busqueda sin JavaScript)</a></li>
@@ -49,7 +59,7 @@ class Response:
         self.url, self.status, self.ctype, self.body, self.error = url, status, ctype, body, error
 
 
-def fetch(url, data=None, method="GET"):
+def fetch(url, data=None, method="GET", extra_headers=None):
     """Bytes of a URL: http, https, file, about, data."""
     if url.startswith("about:"):
         if url in ABOUT:
@@ -83,21 +93,39 @@ def fetch(url, data=None, method="GET"):
             "image/gif" if low.endswith(".gif") else "image/bmp" if low.endswith(".bmp") else "text/plain")
         return Response(url, 200, ctype, body)
     from urllib import request
-    headers = {"User-Agent": USER_AGENT, "Accept": "text/html,image/*;q=0.8,*/*;q=0.5",
-               "Accept-Language": "es,en;q=0.8"}
+    # the picture formats SnakeyOS decodes, by name: with "image/*" CDNs may send AVIF
+    headers = {"User-Agent": USER_AGENT,
+               "Accept": "text/html,application/xhtml+xml,image/webp,image/png,image/jpeg,image/gif;q=0.9,*/*;q=0.5",
+               "Accept-Language": "es,en;q=0.8",
+               "Accept-Encoding": "gzip, deflate"}         # pages and scripts arrive 3-5 times smaller
     from browser import store
     cookie = store.cookies_for(url)
     if cookie:
         headers["Cookie"] = cookie
     if data is not None:
         headers["Content-Type"] = "application/x-www-form-urlencoded"
+    if extra_headers:                       # from a page's script (fetch, XMLHttpRequest)
+        for k, v in extra_headers.items():
+            if k.lower() not in ("host", "content-length", "cookie", "connection"):
+                headers[k] = v
     req = request.Request(url, data, headers, method)
     try:
         r = request.urlopen(req, timeout=30)
         body = r.read()
-        for c in r.headers.get_all("set-cookie"):
+        for c in r.headers.get_all("set-cookie") or []:
             store.set_cookie(r.geturl(), c)
-        return Response(r.geturl(), r.status, (r.getheader("content-type") or "text/html"), body[:MAX_BYTES])
+        final = r.geturl()
+        if "consent." in final.split("/")[2] and not url.startswith("https://consent."):
+            # Google's and YouTube's cookie question (in Europe): answer "reject all" once, then load again
+            for site in ("https://www.google.com/", "https://www.youtube.com/"):
+                store.set_cookie(site, "SOCS=CAI; Domain=.%s; Path=/" % site.split("www.")[1].rstrip("/"))
+            if not getattr(fetch, "retrying", False):
+                fetch.retrying = True
+                try:
+                    return fetch(url, data, method)
+                finally:
+                    fetch.retrying = False
+        return Response(final, r.status, (r.getheader("content-type") or "text/html"), body[:MAX_BYTES])
     except request.HTTPError as e:
         return Response(url, e.code, (e.headers.get("content-type") if e.headers else "text/html") or "text/html",
                         e.read() or ("<h1>Error %d</h1>" % e.code).encode())
@@ -159,6 +187,13 @@ class Page:
         self.width = 0
         self.error = None
         self.raw_image = None
+        self.toggles = {}                  # id -> <details>, for clicks on their <summary>
+        self.js = None                     # the page's scripts (browser/script.py), when it has any
+        self.sheet_cache = {}              # stylesheet URL -> StyleSheet
+        self.navigate_to = None            # a script asked to go to this URL
+        self.pending_submit = None         # a script submitted this form
+        self.alert = None                  # a script's alert() text, to show
+        self.scroll_request = None         # a script asked to scroll here (scrollIntoView)
 
     def resolve(self, href):
         href = href.strip()
@@ -173,7 +208,15 @@ class Page:
     # ---- loading (runs in a thread) ----
     def load(self, width, data=None, method="GET"):
         self.width = width
+        try:
+            _thread.stack_size(512 * 1024)          # page scripts (JavaScript) need room
+        except Exception:
+            pass
         _thread.start_new_thread(self._load, (data, method))
+        try:
+            _thread.stack_size(0)
+        except Exception:
+            pass
 
     def _load(self, data, method):
         try:
@@ -188,6 +231,12 @@ class Page:
                 self._download(r)
                 return
             text = decode(r.body, r.ctype)
+            from browser import sites
+            if r.status == 200 and sites.is_ours(r.url):       # Google, YouTube: our own simple page
+                ours = sites.rewrite(r.url, text, fetch)
+                if ours:
+                    text = ours
+                    r.ctype = "text/html"
             self.source = text
             if "html" not in ctype and not text.lstrip()[:200].lower().startswith(("<!doctype html", "<html")):
                 text = "<pre>%s</pre>" % html_escape(text)
@@ -197,32 +246,20 @@ class Page:
             r = None
             self.doc = html.parse(text)          # decoded with the page's charset, re-encoded as UTF-8
             text = None
+            self._videos_as_links()
+            _lazy_images(self.doc)
+            _react_streaming(self.doc)
             t = self.doc.find("title")
             if t is not None:
                 self.title = " ".join(t.text_content().split())[:80] or self.url
             else:
                 self.title = self.url
-            self.sheets = []
-            for node in self.doc.iter():
-                if node.tag == "style":
-                    s = css.StyleSheet()
-                    s.add(node.text_content(), self.width)
-                    self.sheets.append(s)
-                elif node.tag == "link" and "stylesheet" in node.attrs.get("rel", "").lower() and node.attrs.get("href"):
-                    media = node.attrs.get("media", "all").lower()
-                    if "print" in media and "screen" not in media:
-                        continue
-                    self.status = "hojas de estilo..."
-                    self._changed()
-                    sr = fetch(self.resolve(node.attrs["href"]))
-                    if sr.status == 200:
-                        s = css.StyleSheet()
-                        s.add(decode(sr.body, sr.ctype), self.width)
-                        self.sheets.append(s)
+            self.collect_sheets()
             self.relayout()
             self.status = "listo"
             self.loading = False
             self._changed()
+            self._run_scripts()
             self._load_images()
         except Exception as e:
             import sys
@@ -233,6 +270,96 @@ class Page:
             self.loading = False
             self.status = "error: %r" % e
             self._changed()
+
+    def collect_sheets(self):
+        """The page's style sheets: <style> blocks and <link rel=stylesheet> (fetched once)."""
+        sheets = []
+        for node in self.doc.iter():
+            if node.tag == "style":
+                text = node.text_content()
+                key = ("style", self.width, text)
+                s = _sheets.get(key)
+                if s is None:
+                    s = css.StyleSheet()
+                    s.add(text, self.width)
+                    _remember(key, s)
+                sheets.append(s)
+            elif node.tag == "link" and "stylesheet" in node.attrs.get("rel", "").lower() and node.attrs.get("href"):
+                media = node.attrs.get("media", "all").lower()
+                if "print" in media and "screen" not in media:
+                    continue
+                url = self.resolve(node.attrs["href"])
+                key = ("link", self.width, url)
+                s = _sheets.get(key)
+                if s is None:
+                    self.status = "hojas de estilo..."
+                    self._changed()
+                    sr = fetch(url)
+                    s = css.StyleSheet()
+                    if sr.status == 200:
+                        s.add(decode(sr.body, sr.ctype), self.width)
+                    _remember(key, s)
+                sheets.append(s)
+        self.sheets = sheets
+
+    def restyle(self):
+        """After scripts changed the page: styles, layout, and any new pictures."""
+        self.collect_sheets()
+        _lazy_images(self.doc)
+        self.relayout()
+        new = [n for n in self.doc.iter("img") if n.attrs.get("src") and self.resolve(n.attrs["src"]) not in self.images]
+        if new and not self.loading:
+            try:
+                _thread.start_new_thread(self._load_images, ())
+            except Exception:
+                pass
+
+    def _run_scripts(self):
+        """The page's JavaScript, if it has some and Settings allows it."""
+        try:
+            from pyos import settings
+            if settings.get("javascript") is False:
+                return
+        except Exception:
+            pass
+        from browser import script
+        if not script.available() or not any(True for _ in self.doc.iter("script")):
+            return
+        self.status = "ejecutando JavaScript..."
+        self._changed()
+        try:
+            js = script.Scripts(self)
+            self.js = js
+            if js.start():
+                js.sync()
+            self.status = "listo" if not js.errors else "listo (%d errores de JavaScript)" % js.errors
+        except Exception as e:
+            self.status = "JavaScript: %r" % e
+        self._changed()
+
+    def close(self):
+        if self.js:
+            self.js.close()
+            self.js = None
+
+    def _videos_as_links(self):
+        """<video> and <audio>: a button that plays them in the Videos app."""
+        for node in list(self.doc.iter()):
+            if node.tag not in ("video", "audio"):
+                continue
+            src = node.attrs.get("src")
+            if not src:
+                for c in node.iter("source"):
+                    if c.attrs.get("src") and ("mp4" in c.attrs.get("type", "mp4") or "mpeg" in c.attrs.get("type", "")):
+                        src = c.attrs["src"]
+                        break
+            if not src:
+                continue
+            kind = "Video" if node.tag == "video" else "Audio"
+            node.tag = "a"
+            node.attrs = {"href": "pyos-video:" + self.resolve(src),
+                          "style": "display:block; padding:16px; background:#111; color:#fff; font-weight:bold"}
+            node.children = [html.Node(None, None, node, "▶ Reproducir %s: %s" % (kind.lower(), src.rsplit("/", 1)[-1][:60]))]
 
     def _show_image(self, r):
         from imaging import load
@@ -275,7 +402,7 @@ class Page:
             return
         seen = []
         for node in self.doc.iter("img"):
-            src = node.attrs.get("src") or node.attrs.get("data-src")
+            src = node.attrs.get("src")
             if not src or (node.style or {}).get("display") == "none":
                 continue
             url = self.resolve(src)
@@ -289,7 +416,7 @@ class Page:
             self._changed()
             try:
                 r = fetch(url)
-                if r.status == 200 and r.ctype.lower().startswith("image/") or url.lower().endswith((".png", ".gif", ".jpg", ".jpeg", ".bmp")):
+                if r.status == 200 and r.ctype.lower().startswith("image/") or url.lower().split("?")[0].endswith((".png", ".gif", ".jpg", ".jpeg", ".bmp", ".webp", ".svg")):
                     img = load(r.body, url)
                     w, h = img.get_size()
                     if w * h > 1600 * 1200:
@@ -316,6 +443,18 @@ class Page:
         css.compute(self.doc, self.sheets, self.width)
         self.layout = layout.Layout(self, self.width).run(self.doc)
         self.forms = list(self.doc.iter("form"))
+
+    def toggle(self, href):
+        """A click on a <summary>: open or close its <details> (no script needed)."""
+        node = self.toggles.get(int(href.split(":")[1]))
+        if node is None:
+            return
+        if "open" in node.attrs:
+            del node.attrs["open"]
+        else:
+            node.attrs["open"] = ""
+        self.relayout()
+        self._changed()
 
     # ---- forms ----
     def widget_state(self, node):
@@ -406,6 +545,8 @@ class Page:
                     pygame.draw.rect(surf, (255, 200, 0), (x - 1, y - 1, it.w + 2, it.h + 2), 2)
             elif k == "image":
                 img = self.images.get(it.data)
+                if img is None and it.data.startswith("svg:") and it.data not in self.images:
+                    img = self.images[it.data] = _draw_svg(it)
                 if img is not None:
                     iw, ih = img.get_size()
                     if (iw, ih) != (it.w, it.h):
@@ -498,6 +639,79 @@ class Page:
 
 _text_cache = {}
 _scaled = {}
+
+
+def _react_streaming(doc):
+    """React/Next.js send slow parts of a page later, hidden (<div hidden id="S:0">),
+    with a script $RC("B:0", "S:0") that moves each one where its placeholder
+    (<template id="B:0">) is. Do that move here, without running the script."""
+    pairs = []
+    for sc in doc.iter("script"):
+        text = sc.text_content()
+        i = text.find('$RC("')
+        while i >= 0:
+            j = text.find('"', i + 5)
+            k = text.find('"', j + 1)
+            l = text.find('"', k + 1)
+            if j < 0 or k < 0 or l < 0:
+                break
+            pairs.append((text[i + 5:j], text[k + 1:l]))
+            i = text.find('$RC("', l)
+    if not pairs:
+        return
+    ids = {}
+    for n in doc.iter():
+        ident = n.attrs.get("id")
+        if ident:
+            ids[ident] = n
+    for b, sid in pairs:
+        place, content = ids.get(b), ids.get(sid)
+        if place is None or content is None or place.parent is None:
+            continue
+        parent = place.parent
+        k = parent.children.index(place)
+        for c in content.children:
+            c.parent = parent
+        parent.children[k:k + 1] = content.children      # the placeholder goes, the content comes in
+        content.children = []
+
+
+def _remember(key, sheet):
+    if len(_sheets) > 40:                   # a bounded cache: the oldest go first
+        for k in list(_sheets)[:10]:
+            del _sheets[k]
+    _sheets[key] = sheet
+
+
+def _lazy_images(doc):
+    """Pictures a script would fill in (lazy loading): data-src, srcset... into src."""
+    for node in doc.iter("img"):
+        a = node.attrs
+        src = a.get("src", "")
+        for k in ("data-src", "data-lazy-src", "data-original", "data-lazy", "data-url"):
+            if a.get(k) and not a[k].startswith("data:"):
+                a["src"] = a[k]
+                break
+        else:
+            if not src or src.startswith("data:image/gif") or src.startswith("data:image/svg"):
+                srcset = a.get("srcset") or a.get("data-srcset")
+                if not srcset and node.parent is not None and node.parent.tag == "picture":
+                    for s in node.parent.children:
+                        if s.tag == "source" and (s.attrs.get("srcset") or s.attrs.get("data-srcset")):
+                            srcset = s.attrs.get("srcset") or s.attrs.get("data-srcset")
+                            break
+                if srcset:
+                    a["src"] = srcset.split(",")[0].strip().split(" ")[0]
+
+
+def _draw_svg(it):
+    """An <svg> of the page, drawn the size the layout gave it (once)."""
+    try:
+        from imaging import svg
+        col = (it.node.style or {}).get("color", (0, 0, 0))
+        return svg.render_node(it.node, it.w, it.h, col if isinstance(col, tuple) else (0, 0, 0))
+    except Exception:
+        return None
 
 
 def _render(s, color, f=None):

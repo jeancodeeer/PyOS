@@ -36,7 +36,13 @@ class Dll:
 # DLL names that are served by another one
 SAME_AS = {"kernelbase": "kernel32", "ucrtbase": "msvcrt", "msvcr100": "msvcrt", "msvcr110": "msvcrt",
            "msvcr120": "msvcrt", "vcruntime140": "msvcrt", "msvcp_win": "msvcrt", "crtdll": "msvcrt"}
-MODULES = ("kernel32", "msvcrt", "user32", "gdi32", "opengl32", "glu32", "advapi32", "shell32", "comdlg32")
+MODULES = ("kernel32", "msvcrt", "user32", "gdi32", "opengl32", "glu32", "advapi32", "shell32", "comdlg32",
+           "shlwapi", "comctl32", "uxtheme", "dwmapi", "ole32", "oleaut32", "crypt32", "wintrust", "bcrypt",
+           "version", "dbghelp", "imm32", "sensapi", "wininet", "msimg32")
+# small DLLs that live in the file of a bigger one, as dll_<name>
+IN_FILE = {"dwmapi": "uxtheme", "oleaut32": "ole32", "wintrust": "crypt32", "bcrypt": "crypt32",
+           "dbghelp": "misc", "imm32": "misc", "sensapi": "misc", "wininet": "misc", "version": "misc",
+           "msimg32": "gdi32"}
 _loaded = {}
 
 
@@ -57,7 +63,8 @@ def module(name):
     if name not in MODULES:
         return None
     if name not in _loaded:
-        _loaded[name] = __import__("pywin.dlls." + name, None, None, ["dll"]).dll
+        mod = __import__("pywin.dlls." + IN_FILE.get(name, name), None, None, ["dll"])
+        _loaded[name] = getattr(mod, "dll_" + name, None) or mod.dll
     return _loaded[name]
 
 

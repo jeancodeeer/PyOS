@@ -9,7 +9,7 @@ Uses a Windows QEMU if one is on PATH, otherwise the one inside WSL.
 COM2 is connected to tools/jeancode_bridge.py, which runs here and makes the
 HTTPS requests of JeanCode when the machine has no network card.
 Its log (method and host only, never keys) is build/bridge.log.
-Edit files under pyfs/ (PyKernel) or pyos/ (PyOS) and run again: the boot
+Edit files under pyfs/ (PyKernel) or pyos/ (SnakeyOS) and run again: the boot
 archive is repacked each time.
 build/disk.img is the machine's hard disk (/disk inside); it keeps its contents.
 """
@@ -41,6 +41,27 @@ def host_path(p: Path) -> str:
     return wsl_path(p) if uses_wsl() else str(p)
 
 
+def accel_options():
+    """Hardware acceleration for QEMU, when this computer has it: the virtual
+    machine then runs at nearly the real CPU's speed instead of being emulated
+    instruction by instruction (10 to 50 times slower). Each -accel is tried in
+    turn, so a machine without it still boots with plain emulation (tcg).
+    PYKERNEL_ACCEL=tcg turns it off; =kvm, =whpx or =hvf picks one."""
+    choice = os.environ.get("PYKERNEL_ACCEL", "auto").lower()
+    if choice not in ("auto", ""):
+        return ["-accel", choice] + ([] if choice == "tcg" else ["-accel", "tcg"])
+    if uses_wsl() or sys.platform.startswith("linux"):
+        kvm = os.path.exists("/dev/kvm") and os.access("/dev/kvm", os.R_OK | os.W_OK)
+        if uses_wsl():
+            kvm = subprocess.run(["wsl", "-e", "test", "-w", "/dev/kvm"], capture_output=True).returncode == 0
+        return ["-accel", "kvm", "-cpu", "host", "-accel", "tcg"] if kvm else []
+    if sys.platform == "win32":
+        return ["-accel", "whpx,kernel-irqchip=off", "-accel", "tcg"]
+    if sys.platform == "darwin":
+        return ["-accel", "hvf", "-accel", "tcg"]
+    return []
+
+
 def make_disk(path: Path, fresh=False):
     if fresh or not path.is_file():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -49,12 +70,20 @@ def make_disk(path: Path, fresh=False):
     return path
 
 
-def qemu_command(extra, memory="512", disk=None):
+def qemu_command(extra, memory=None, disk=None):
     kernel, fs = ROOT / "build" / "kernel.bin", ROOT / "build" / "pyfs.img"
     if not kernel.is_file():
         sys.exit("build/kernel.bin is missing: run  python tools/build.py")
     base = ["wsl", "-e", "qemu-system-x86_64"] if uses_wsl() else [shutil.which("qemu-system-x86_64") or "qemu-system-x86_64"]
+    memory = memory or os.environ.get("PYKERNEL_RAM", "2048")       # MiB; like a modest real PC
     cmd = base + ["-m", memory, "-no-reboot", "-kernel", host_path(kernel), "-initrd", host_path(fs)]
+    cmd += accel_options()
+    # the kernel's command line. Without a screen (tests, the serial console) SnakeyOS
+    # starts in the text console; with one, it boots into the desktop
+    headless = "-display" in extra and extra[extra.index("-display") + 1] == "none"
+    append = os.environ.get("PYKERNEL_APPEND", "console" if headless else "")
+    if append:
+        cmd += ["-append", append]
     # a network card on QEMU's built-in NAT: DHCP gives 10.0.2.15, the host is 10.0.2.2
     cmd += ["-nic", os.environ.get("PYKERNEL_NIC", "user,model=virtio-net-pci")]
     # an AC'97 sound card; PYKERNEL_AUDIO=pa (or sdl, alsa, coreaudio, dsound) to hear it
@@ -63,8 +92,13 @@ def qemu_command(extra, memory="512", disk=None):
     if os.environ.get("PYKERNEL_USB"):          # a USB controller with a stick: PYKERNEL_USB=path/to/stick.img
         cmd += ["-device", "qemu-xhci,id=xhci", "-drive", "if=none,id=usbstick,format=raw,file=" + os.environ["PYKERNEL_USB"],
                 "-device", "usb-storage,bus=xhci.0,drive=usbstick"]
+    # a printer on LPT1: what PyKernel prints goes to this file (PYKERNEL_PRINTER=out.prn)
+    if os.environ.get("PYKERNEL_PRINTER"):
+        cmd += ["-parallel", "file:" + host_path(Path(os.environ["PYKERNEL_PRINTER"]))]
     if disk:
         cmd += ["-drive", f"file={host_path(disk)},format=raw,if=ide,index=0,media=disk"]
+    # more QEMU options, e.g. PYKERNEL_QEMU="-device intel-hda -device hda-duplex"
+    cmd += os.environ.get("PYKERNEL_QEMU", "").split()
     return cmd + extra
 
 
@@ -80,7 +114,7 @@ def bridge_serial(port):
 
 
 def start_bridge(port, log_path):
-    env = dict(os.environ, PYTHONPATH=str(ROOT / "pyos" / "lib"))      # jeancode lives in PyOS
+    env = dict(os.environ, PYTHONPATH=str(ROOT / "pyos" / "lib"))      # jeancode lives in SnakeyOS
     log = open(log_path, "ab")
     return subprocess.Popen([sys.executable, str(ROOT / "tools" / "jeancode_bridge.py"),
                              "--connect", f"127.0.0.1:{port}", "--wait", "120"],
@@ -102,7 +136,9 @@ def window_display():
 
 if __name__ == "__main__":
     mkfs.pack(ROOT / "pyfs", ROOT / "build" / "pyfs.img")
-    disk = make_disk(ROOT / "build" / "disk.img")
+    # --disk other.img: boot with that disk at /disk (e.g. build/notepadpp-disk.img)
+    chosen = sys.argv[sys.argv.index("--disk") + 1] if "--disk" in sys.argv[:-1] else None
+    disk = Path(chosen) if chosen else make_disk(ROOT / "build" / "disk.img")
     port = None if "--no-bridge" in sys.argv else free_port()
     com2 = bridge_serial(port) if port else []
     if "--screen" in sys.argv:

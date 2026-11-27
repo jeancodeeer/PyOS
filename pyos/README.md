@@ -1,17 +1,19 @@
-<p align="center"><img src="../docs/pyos-logo.svg" alt="El logo de PyOS: una serpiente cuyo cuerpo forma la cruz de una ventana de cuatro cristales, azules y amarillos" width="160"></p>
+<p align="center"><img src="../docs/pyos-logo.svg" alt="El logo de SnakeyOS: una serpiente cuyo cuerpo forma la cruz de una ventana de cuatro cristales, azules y amarillos" width="160"></p>
 
-# PyOS
+# SnakeyOS
 
-**PyOS es el sistema operativo; PyKernel es su núcleo.** Son dos cosas separadas en este repositorio:
+**SnakeyOS es el sistema operativo; PyKernel es su núcleo.** Son dos cosas separadas en este repositorio:
 
 | | QUÉ ES | DÓNDE |
 |---|---|---|
-| **PyKernel** | El núcleo: arranque (Rust), MicroPython, drivers, memoria, red, TLS, procesos, consola `>>>`. Funciona solo, sin PyOS. | `pyfs/` |
-| **PyOS** | Lo que usa la gente: escritorio, apps, navegador web, fuentes, sonidos, imágenes. | `pyos/` |
+| **PyKernel** | El núcleo: arranque (Rust), MicroPython, drivers, memoria, red, TLS, procesos, consola `>>>`. Funciona solo, sin SnakeyOS. | `pyfs/` |
+| **SnakeyOS** | Lo que usa la gente: escritorio, apps, navegador web, fuentes, sonidos, imágenes. | `pyos/` |
 
 Al compilar, `tools/mkfs.py` superpone los dos árboles en la imagen de arranque (`pyos/lib/desktop` acaba en `/lib/desktop`). Con `PYKERNEL_ONLY=1 python tools/build.py --fs` se obtiene el núcleo solo.
 
-PyKernel no sabe nada de PyOS. Al arrancar ejecuta `/etc/init.d/*.py`, y PyOS se engancha con `pyos/etc/init.d/50-pyos.py`, que añade los comandos `desktop`, `browse`, `jeancode`, `apps`, `install_app` y `pyos_autostart`.
+PyKernel no sabe nada de SnakeyOS. Al arrancar ejecuta `/etc/init.d/*.py`, y SnakeyOS se engancha con `pyos/etc/init.d/50-pyos.py`, que añade los comandos `desktop`, `browse`, `jeancode`, `apps`, `install_app` y `pyos_autostart`.
+
+Al encender, SnakeyOS arranca directo en el escritorio, como cualquier sistema: animación de arranque, en el primer arranque la creación de tu cuenta (la primera es administradora), la pantalla de usuarios con contraseña y la bienvenida. Desde el menú de inicio: Bloquear, Cerrar sesión, Consola, Reiniciar y Apagar. Para arrancar en la consola de texto: la segunda entrada de GRUB ("consola de texto"), `-append console` en QEMU, o `pyos_autostart(False)`.
 
 ## Todo es Python con pygame
 
@@ -24,7 +26,7 @@ Todas las aplicaciones son archivos `.py` que dibujan con pygame:
 
 Cada una es una app propia, con nombre genérico y diseño propio:
 
-| EN WINDOWS | EN PyOS | QUÉ HACE |
+| EN WINDOWS | EN SnakeyOS | QUÉ HACE |
 |---|---|---|
 | Bloc de notas | **Bloc de notas** (`bloc.py`) | Menús Archivo/Editar/Formato, abrir y guardar, buscar (F3) y reemplazar, ajuste de línea, fecha y hora (F5), zoom. Abre los `.txt`. |
 | WordPad / Word | **Escritor** (`escritor.py`) | Títulos, subtítulos, negrita, alineación y colores por párrafo; guarda HTML, que se abre en el navegador. |
@@ -61,7 +63,7 @@ Unidades: `C:\` es `/disk` y `Z:\` es todo el sistema de archivos.
 | Cambio de contexto | `cpu.py` | Trampolines de entrada y salida, generados con un mini ensamblador legible. Un juego de registros por hilo. |
 | Proceso | `process.py` | Hilos (pila, TEB y TLS propios), DLL del programa, importaciones y llamadas de Python al programa (*callbacks*). |
 | Excepciones | `seh.py` | `throw`/`catch` de C++: recorre las tablas `.pdata`/`.xdata` del programa, como Windows. |
-| Escritorio | `host.py` | Cada ventana Win32 es una ventana de PyOS, con su barra de menús; el ratón y el teclado llegan como mensajes `WM_*`. La consola tiene colores. |
+| Escritorio | `host.py` | Cada ventana Win32 es una ventana de SnakeyOS, con su barra de menús; el ratón y el teclado llegan como mensajes `WM_*`. La consola tiene colores. |
 
 Las DLL de Windows, escritas en Python (`dlls/`):
 
@@ -71,7 +73,7 @@ Las DLL de Windows, escritas en Python (`dlls/`):
 | `msvcrt` | La biblioteca de C: `printf`/`scanf`, cadenas, memoria, ficheros, matemáticas, `qsort`, hora y el arranque de C y C++. |
 | `user32` | Ventanas, mensajes, temporizadores, botones, textos y cuadros de edición, menús (también desde recursos), `MessageBox`. |
 | `gdi32` | Dibujo con pygame: líneas, figuras, texto, mapas de bits, `BitBlt`, DIB. |
-| `opengl32`, `glu32` | OpenGL para programas de Windows (WGL), dibujado por el OpenGL de PyOS. |
+| `opengl32`, `glu32` | OpenGL para programas de Windows (WGL), dibujado por el OpenGL de SnakeyOS. |
 | `advapi32` | El registro de Windows, guardado en `/disk/pywin/registro.json`. |
 | `shell32`, `comdlg32` | `ShellExecute` (abre webs en el Navegador y documentos con su app), carpetas especiales y los diálogos *Abrir* y *Guardar como*. |
 
@@ -158,11 +160,11 @@ Las apps del sistema están en `/apps`; las que instalas tú, en `/disk/apps`. L
 
 **Instalar una app:**
 
-- La **Tienda** (pestaña *Apps de PyOS*): pega una URL o una ruta (`/usb/juego.py`) y pulsa *Instalar*.
+- La **Tienda** (pestaña *Apps de SnakeyOS*): pega una URL o una ruta (`/usb/juego.py`) y pulsa *Instalar*.
 - En la consola: `install_app('https://.../juego.py')`.
-- Doble clic en un `.py` con cabecera PyOS, en el escritorio o en Archivos.
+- Doble clic en un `.py` con cabecera SnakeyOS, en el escritorio o en Archivos.
 
-Un juego pygame **sin cabecera** también se instala: PyOS le añade una cabecera y lo ejecuta a pantalla completa. Probado con un Pong escrito para PC, descargado por HTTP.
+Un juego pygame **sin cabecera** también se instala: SnakeyOS le añade una cabecera y lo ejecuta a pantalla completa. Probado con un Pong escrito para PC, descargado por HTTP.
 
 ## El escritorio
 
@@ -192,10 +194,10 @@ Este pygame es una implementación propia, no el pygame de SDL. Una app de terce
 | Los ejemplos del propio pygame (`aliens.py`, `chimp.py`, `stars.py`...), licencia LGPL | Necesitan sus imágenes y sonidos al lado; `stars` y `chimp` usan lo que hay; `aliens` usa sonidos OGG (sonarían en silencio). |
 | Paquetes de Python puro de micropython-lib (json, base64, datetime, pystone...) | Se instalan desde la Tienda, pestaña *Paquetes de Python* (`kernel/pkg.py`). |
 | Pygame Zero (`pgzrun`) | No: necesitaría portar su librería encima de este pygame. |
-| Juegos con PyOpenGL (modo inmediato, OpenGL 1.x) | **Funcionan**: PyOS trae su propio OpenGL por software (ver *OpenGL*). Más lentos que con una tarjeta gráfica. |
+| Juegos con PyOpenGL (modo inmediato, OpenGL 1.x) | **Funcionan**: SnakeyOS trae su propio OpenGL por software (ver *OpenGL*). Más lentos que con una tarjeta gráfica. |
 | Juegos que usan numpy, `surfarray`, `pygame.freetype` u otras extensiones en C | No: MicroPython no carga extensiones en C de CPython. |
 
-No he descargado ni probado juegos de terceros concretos: el entorno de pruebas no tiene acceso a GitHub. La compatibilidad se comprobó con un juego pygame típico escrito aparte (`pong.py`, sin cabecera PyOS).
+No he descargado ni probado juegos de terceros concretos: el entorno de pruebas no tiene acceso a GitHub. La compatibilidad se comprobó con un juego pygame típico escrito aparte (`pong.py`, sin cabecera SnakeyOS).
 
 ## El logo
 

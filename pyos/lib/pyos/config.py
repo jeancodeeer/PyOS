@@ -1,4 +1,4 @@
-# PyOS settings, kept on the disk in /disk/etc/pyos.json.
+# SnakeyOS settings, kept on the disk in /disk/etc/pyos.json.
 import json
 
 PATH = "/disk/etc/pyos.json"

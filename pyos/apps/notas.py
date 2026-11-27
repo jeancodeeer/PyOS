@@ -4,7 +4,7 @@
 # mode: window
 #
 # Sticky notes. Each note is a text file in /disk/Notas; changes are saved
-# as you type. A small example of a PyOS app in one .py file.
+# as you type. A small example of a SnakeyOS app in one .py file.
 import os
 import pygame
 from desktop import theme as T, ui

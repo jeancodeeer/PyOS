@@ -19,9 +19,9 @@ def load(file, namehint=""):
         return _load_bmp(data)
     if data[:2] == b"\xff\xd8" or data[:4] == b"GIF8":
         try:
-            import imaging                      # the JPEG and GIF decoders (PyOS)
+            import imaging                      # the JPEG and GIF decoders (SnakeyOS)
         except ImportError:
-            raise error("JPEG and GIF need the imaging module (part of PyOS)")
+            raise error("JPEG and GIF need the imaging module (part of SnakeyOS)")
         return imaging.load(data)
     raise error("unsupported image format (BMP, PNG, JPEG and GIF work)")
 

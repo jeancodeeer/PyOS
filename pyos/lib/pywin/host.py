@@ -1,4 +1,4 @@
-# PyWin on the PyOS desktop: a Windows program's console and windows
+# PyWin on the SnakeyOS desktop: a Windows program's console and windows
 # become desktop windows.
 #
 #   from pywin import host
@@ -172,6 +172,26 @@ class Host:
             time.sleep_ms(20)
         return box["result"]
 
+    def choose(self, caption, text, options):
+        """Ask the user to pick one of options (a dialog with one button each). Its number, or None."""
+        from desktop.dialog import Dialog
+        box = {"result": None, "done": False}
+
+        def show():
+            w = _wm()
+            values = tuple((label, k) for k, label in enumerate(options)) + (("Cancelar", None),)
+
+            def done(v):
+                box["result"] = v if v is not False else None
+                box["done"] = True
+            w.dialog = Dialog(w, caption, text, None, values, done)
+        _wm().later(show)
+        while not box["done"]:
+            if self.p.killed:
+                return None
+            time.sleep_ms(20)
+        return box["result"]
+
     # ---- windows ----
     def open_window(self, wnd):
         wnd.host = "opening"
@@ -260,18 +280,28 @@ def start(path, args=()):
     """Run a Windows program on the desktop. Returns the Host, or None."""
     name = path.rsplit("/", 1)[-1]
     host = Host(name)
-    try:
-        host.p = Process(path, args, ui=host)
-    except Exception as e:
-        _wm().toast("PyWin: no se puede abrir %s: %s" % (name, e))
-        return None
-    if host.p.image.console:
-        host.open_console()
+
+    def load_and_run():
+        # loading a big program takes a moment: it happens here, in the
+        # program's own thread, so the desktop never freezes meanwhile
+        from pywin.process import _debug
+        _debug("cargando " + path)
+        try:
+            host.p = Process(path, args, ui=host)
+            _debug("cargado: base %#x, %d funciones importadas" % (host.p.base, len(host.p.bound)))
+        except Exception as e:
+            _debug("no se pudo cargar: %r" % e)
+            host.running = False
+            _wm().later(lambda: _wm().toast("PyWin: no se puede abrir %s: %s" % (name, e)))
+            return
+        if host.p.image.console:
+            host.open_console()
+        host.run()
     try:
         _thread.stack_size(64 * 1024)
     except Exception:
         pass
-    _thread.start_new_thread(host.run, ())
+    _thread.start_new_thread(load_and_run, ())
     return host
 
 

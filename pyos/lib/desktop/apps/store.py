@@ -1,4 +1,4 @@
-# Store: PyOS apps (.py files) and Python packages.
+# Store: SnakeyOS apps (.py files) and Python packages.
 #
 # An app is one .py file with a '# pyos-app' header (see desktop/apps).
 # Install one from a URL or a file (a USB stick, say): it goes to
@@ -21,7 +21,7 @@ class Store(App):
 
     def build(self):
         f = self.form = ui.Form()
-        for i, name in enumerate(("Apps de PyOS", "Paquetes de Python")):
+        for i, name in enumerate(("Apps de SnakeyOS", "Paquetes de Python")):
             b = f.add(ui.Button((16 + 170 * i, 12, 160, 30), name, lambda i=i: self.set_tab(i)))
             b.primary = i == self.tab
         if self.tab == 0:
@@ -49,7 +49,7 @@ class Store(App):
     def resized(self, w, h):
         self.build()
 
-    # ---- PyOS apps ----
+    # ---- SnakeyOS apps ----
     def fill_apps(self):
         from desktop import apps
         apps.scan()
@@ -123,7 +123,7 @@ class Store(App):
     def draw(self, surf):
         surf.fill(T.WIN_BG)
         self.form.draw(surf)
-        ui.text(surf, self.msg or ("Las apps de PyOS son archivos .py con pygame" if self.tab == 0 else ""),
+        ui.text(surf, self.msg or ("Las apps de SnakeyOS son archivos .py con pygame" if self.tab == 0 else ""),
                 300, self.win.h - 68, T.MUTED, max_w=self.win.w - 316)
 
     def event(self, ev, pos):

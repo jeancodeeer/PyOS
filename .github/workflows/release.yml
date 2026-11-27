@@ -1,4 +1,4 @@
-# Builds PyOS from source and publishes the bootable ISO.
+# Builds SnakeyOS from source and publishes the bootable ISO.
 #
 #   git tag v1.0 && git push origin v1.0     -> a release named after the tag
 #   Actions -> Release -> Run workflow       -> the same, by hand
@@ -29,7 +29,7 @@ jobs:
       - name: Tools (GRUB and xorriso for the ISO, QEMU to try it)
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends grub-pc-bin grub-common xorriso mtools qemu-system-x86
+          sudo apt-get install -y -qq --no-install-recommends grub-pc-bin grub-efi-amd64-bin grub-common xorriso mtools qemu-system-x86
 
       - name: Rust for a bare-metal x86_64 target
         uses: dtolnay/rust-toolchain@stable
@@ -37,7 +37,7 @@ jobs:
           targets: x86_64-unknown-none
           components: llvm-tools
 
-      - name: Build PyKernel + PyOS
+      - name: Build PyKernel + SnakeyOS
         run: python3 tools/build.py
 
       - name: Make the ISO
@@ -45,22 +45,36 @@ jobs:
           python3 tools/iso.py
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
-          cp build/pyos.iso "pyos-${TAG#v}.iso"
-          sha256sum "pyos-${TAG#v}.iso" > "pyos-${TAG#v}.iso.sha256"
+          cp build/snakeyos.iso "snakeyos-${TAG#v}.iso"
+          sha256sum "snakeyos-${TAG#v}.iso" > "snakeyos-${TAG#v}.iso.sha256"
 
-      - name: Boot it once in QEMU (it must reach the PyOS prompt)
+      - name: Boot it once in QEMU (it must reach the SnakeyOS prompt)
         run: |
-          timeout 120 qemu-system-x86_64 -m 512 -cdrom "pyos-${TAG#v}.iso" -boot d -display none \
+          timeout 120 qemu-system-x86_64 -m 512 -cdrom "snakeyos-${TAG#v}.iso" -boot d -display none \
             -serial stdio -no-reboot > boot.log 2>&1 || true
-          grep -a "PyOS 1" boot.log
+          grep -a "SnakeyOS" boot.log
+
+      - name: The signed update (SnakeyOS Update), when the signing key is a repository secret
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -n "$UPDATE_SIGNING_KEY" ]; then
+            pip install -q cryptography
+            python3 tools/make_update.py build "${TAG#v}" --notes "docs/releases/${TAG}.md"
+          else
+            echo "no UPDATE_SIGNING_KEY secret: the release has the ISO only"
+          fi
 
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
-          name: PyOS ${{ env.TAG }}
+          name: SnakeyOS ${{ env.TAG }}
           body_path: docs/releases/${{ env.TAG }}.md
           files: |
-            pyos-*.iso
-            pyos-*.iso.sha256
+            snakeyos-*.iso
+            snakeyos-*.iso.sha256
             docs/video/pyos-demo.mp4
+            dist/snakeyos-*.zip
+            dist/update.json
+            dist/update.json.sig

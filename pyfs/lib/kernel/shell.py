@@ -83,7 +83,7 @@ class Command:
 
 def command(summary, usage=""):
     """Register a console command. The operating system on top of the
-    kernel (PyOS) adds its own commands this way from /etc/init.d."""
+    kernel (SnakeyOS) adds its own commands this way from /etc/init.d."""
     def wrap(fn):
         cmd = Command(fn, summary, usage)
         _commands[cmd.name] = cmd
@@ -717,6 +717,8 @@ def lsdrv():
     from kernel import drivers
     for where, ids, cls, drv in drivers.table():
         print("  %s  %s  %-10s %s" % (where, ids, cls, ("%-11s %s" % (drv, drivers.WHAT.get(drv, ""))) if drv else "-"))
+    for where, what, drv in drivers.legacy():
+        print("  %-21s %-10s %-11s %s" % (where, what, drv, drivers.WHAT.get(drv, "")))
     try:
         from kernel import usb
         for d in usb.devices:

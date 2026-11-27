@@ -38,6 +38,10 @@ def main():
         from kernel import disktool
         if disktool.installed():             # the installed copy comes before the boot image
             sys.path.insert(0, "/disk/system/lib")
+            try:
+                disktool.apply_update(log=log.info)   # and its /etc, /apps, /share, /bin (updates)
+            except Exception as e:
+                log.warn("update: could not apply: %r" % e)
         line = "Disk: %d MiB mounted at /disk (files there survive power-off)" % (disk.sectors >> 11)
         log.info(line, echo=True)
         n = history.enable()
@@ -105,7 +109,7 @@ def _system():
 
 def _init_scripts():
     """Run /etc/init.d/*.py in order: how an operating system built on the
-    kernel (PyOS, for one) starts itself and adds its commands."""
+    kernel (SnakeyOS, for one) starts itself and adds its commands."""
     import os
     import __main__
     try:

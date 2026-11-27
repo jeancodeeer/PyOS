@@ -1,4 +1,4 @@
-"""Write the PyOS logo as SVG (pyos/share/pyos/logo.svg and docs/pyos-logo.svg)
+"""Write the SnakeyOS logo as SVG (pyos/share/pyos/logo.svg and docs/pyos-logo.svg)
 from the same shapes pyos/lib/pyos/logo.py draws with pygame.
 
     python tools/mklogo.py
@@ -21,7 +21,7 @@ def svg():
     def rgb(c):
         return "#%02x%02x%02x" % c
     out = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 106" width="256" height="272">',
-           "<title>PyOS</title>"]
+           "<title>SnakeyOS</title>"]
     for x, y, c in ns["PANES"]:
         out.append('<rect x="%d" y="%d" width="%d" height="%d" rx="6" fill="%s"/>' % (x, y, ns["PANE"], ns["PANE"], rgb(c)))
     d = "M" + " L".join("%g %g" % p for p in ns["PATH"])

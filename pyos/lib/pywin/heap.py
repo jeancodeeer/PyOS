@@ -9,9 +9,17 @@ ARENA = 4 << 20          # bytes asked from the kernel at a time
 ALIGN = 16
 
 
+SMALL = 1024                    # blocks up to this size are kept in "bins", one per size
+
+
 class Heap:
+    """Small blocks (most of them) are reused from a bin of blocks of their
+    exact size: no searching. Bigger blocks come from the free list, sorted
+    by address, where neighbours are joined again."""
+
     def __init__(self):
         self.free_list = []         # [(address, size)], sorted by address
+        self.bins = {}              # size -> [addresses of free blocks of that size]
         self.used = {}              # address -> size
         self.arenas = []            # (address, pages), to give back at the end
 
@@ -25,6 +33,14 @@ class Heap:
 
     def alloc(self, size, zero=True):
         size = max(ALIGN, (size + ALIGN - 1) & ~(ALIGN - 1))
+        if size <= SMALL:
+            spare = self.bins.get(size)
+            if spare:
+                addr = spare.pop()
+                self.used[addr] = size
+                if zero:
+                    mem.zero(addr, size)
+                return addr
         for _ in range(2):
             for i, (addr, hole) in enumerate(self.free_list):
                 if hole >= size:
@@ -42,7 +58,10 @@ class Heap:
     def free(self, addr):
         size = self.used.pop(addr, None)
         if size:
-            self._release(addr, size)
+            if size <= SMALL:
+                self.bins.setdefault(size, []).append(addr)
+            else:
+                self._release(addr, size)
 
     def size(self, addr):
         return self.used.get(addr, 0)
@@ -61,9 +80,14 @@ class Heap:
     def _release(self, addr, size):
         """Put a block back in the free list, joined with its neighbours."""
         holes = self.free_list
-        i = 0
-        while i < len(holes) and holes[i][0] < addr:
-            i += 1
+        lo, hi = 0, len(holes)                  # binary search: where addr goes
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if holes[mid][0] < addr:
+                lo = mid + 1
+            else:
+                hi = mid
+        i = lo
         holes.insert(i, (addr, size))
         if i + 1 < len(holes) and addr + size == holes[i + 1][0]:          # join the next hole
             holes[i] = (addr, size + holes[i + 1][1])
@@ -75,4 +99,4 @@ class Heap:
     def destroy(self):
         for base, pages in self.arenas:
             mm.free_contiguous(base, pages)
-        self.arenas, self.free_list, self.used = [], [], {}
+        self.arenas, self.free_list, self.used, self.bins = [], [], {}, {}

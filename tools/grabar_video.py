@@ -1,4 +1,4 @@
-"""Record a video of PyOS: from the boot to the guided tour of every app.
+"""Record a video of SnakeyOS: from the boot to the guided tour of every app.
 
     python tools/doom.py                 # optional: DOOM for the PyWin part
     python tools/grabar_video.py         # -> build/pyos-demo.mp4
@@ -7,7 +7,7 @@ QEMU runs with its monitor on a socket of its own; a thread takes a
 picture of the screen ("screendump") several times a second and hands it
 to ffmpeg, which makes an H.264 video at 25 frames per second. Meanwhile
 this script types at the PyKernel console like a person would, then runs
-tour() (pyos/lib/pyos/tour.py): the robot inside PyOS does the rest.
+tour() (pyos/lib/pyos/tour.py): the robot inside SnakeyOS does the rest.
 """
 import os
 import queue

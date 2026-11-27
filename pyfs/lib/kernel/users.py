@@ -12,6 +12,12 @@ ITERATIONS = 2000
 _accounts = None
 current_uid = 0
 
+try:
+    PermissionError
+except NameError:                                 # MicroPython has no PermissionError of its own
+    class PermissionError(OSError):
+        pass
+
 
 def _pbkdf2(password, salt, iterations=ITERATIONS):
     import crypto
@@ -133,3 +139,15 @@ def is_root():
 def require_root():
     if not is_root():
         raise PermissionError("you need to be root (su('root'))")
+
+
+def is_admin(name=None):
+    """root, or an account marked "administrador" (the first one SnakeyOS creates is)."""
+    name = name or whoami()
+    a = accounts().get(name)
+    return name == "root" or (a is not None and "administrador" in a["gecos"])
+
+
+def require_admin():
+    if not is_admin():
+        raise PermissionError("hace falta una cuenta de administrador")

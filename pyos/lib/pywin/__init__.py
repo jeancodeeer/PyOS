@@ -1,4 +1,4 @@
-# PyWin: run Windows programs (.exe) on PyOS, a little like Wine.
+# PyWin: run Windows programs (.exe) on SnakeyOS, a little like Wine.
 #
 #   import pywin
 #   pywin.run("/disk/hola.exe")            # from the PyKernel prompt
@@ -10,6 +10,7 @@
 from pywin.process import Process, Exit, to_host, to_windows
 
 VERSION = "1.0"
+DEBUG = False          # True: missing functions and errors also go to the serial port
 
 
 def run(path, args=(), ui=None, cwd=None):

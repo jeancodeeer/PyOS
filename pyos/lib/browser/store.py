@@ -57,6 +57,12 @@ def history():
 def visit(title, url):
     if url.startswith("about:"):
         return
+    try:
+        from pyos import settings
+        if not settings.get("historial_navegador"):
+            return                       # Settings > Privacidad: no history
+    except ImportError:
+        pass
     h = history()
     h.append([title, url])
     del h[:-300]
@@ -92,3 +98,13 @@ def about_page(url):
         rows = "".join('<li><a href="%s">%s</a></li>' % (_esc(u), _esc(t)) for t, u in reversed(history()[-100:]))
         return "<title>Historial</title><h1>Historial</h1><ol>%s</ol>" % rows
     return None
+
+
+def clear_history():
+    global _history
+    _history = []
+    _save("history.json", [])
+
+
+def clear_cookies():
+    _cookies.clear()

@@ -13,6 +13,8 @@ IRQ = 12
 x = y = 0
 buttons = 0
 bounds = (640, 480)
+speed = 1.0                # pointer speed (Settings): 0.5 slower ... 2.0 faster
+left_handed = False        # swap the left and right buttons
 listener = None          # fn(dx, dy, buttons)
 present = False
 _packet = []
@@ -61,6 +63,10 @@ def _config_locked(update):
 def move(dx, dy, new_buttons):
     """Any pointing device (PS/2 here, USB in usb.py) reports movement here."""
     global x, y, buttons
+    if speed != 1.0:
+        dx, dy = int(round(dx * speed)), int(round(dy * speed))
+    if left_handed:                       # bit 0 = left, bit 1 = right
+        new_buttons = (new_buttons & ~3) | ((new_buttons & 1) << 1) | ((new_buttons & 2) >> 1)
     x = max(0, min(bounds[0] - 1, x + dx))
     y = max(0, min(bounds[1] - 1, y + dy))
     buttons = new_buttons

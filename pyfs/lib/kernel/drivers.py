@@ -4,16 +4,16 @@
 from kernel import pci
 
 BY_ID = {
-    (0x1AF4, 0x1000): "virtio_net", (0x10EC, 0x8139): "rtl8139",
+    (0x1AF4, 0x1000): "virtio_net", (0x1AF4, 0x1001): "virtio_blk", (0x10EC, 0x8139): "rtl8139",
     (0x8086, 0x100E): "e1000", (0x8086, 0x100F): "e1000", (0x8086, 0x10D3): "e1000", (0x8086, 0x153A): "e1000",
     (0x8086, 0x2415): "ac97", (0x8086, 0x2425): "ac97", (0x8086, 0x24C5): "ac97", (0x8086, 0x266E): "ac97",
     (0x1234, 0x1111): "video",
 }
 BY_CLASS = {
-    (0x01, 0x01): "ata", (0x01, 0x06): "ahci", (0x01, 0x08): "nvme", (0x0C, 0x03): "xhci", (0x03, 0x00): "video",
+    (0x01, 0x01): "ata", (0x04, 0x03): "hda", (0x01, 0x06): "ahci", (0x01, 0x08): "nvme", (0x0C, 0x03): "xhci", (0x03, 0x00): "video",
 }
-WHAT = {"virtio_net": "network", "rtl8139": "network", "e1000": "network", "ac97": "sound", "video": "graphics",
-        "ata": "IDE disks", "ahci": "SATA disks", "nvme": "NVMe disks", "xhci": "USB"}
+WHAT = {"virtio_net": "network", "rtl8139": "network", "e1000": "network", "ac97": "sound", "hda": "sound (HD Audio)", "virtio_blk": "virtio disks", "video": "graphics",
+        "ata": "IDE disks", "lpt": "printer", "ahci": "SATA disks", "nvme": "NVMe disks", "xhci": "USB"}
 
 
 def driver_for(vendor, device, cls, sub):
@@ -29,12 +29,30 @@ def table():
     return rows
 
 
+def legacy():
+    """Devices that are not on PCI (they sit at fixed I/O ports): [(where, what, driver)]."""
+    rows = []
+    try:
+        from kernel import lpt
+        for port in lpt.ports:
+            rows.append(("isa %#x" % port.base, port.name + " parallel", "lpt"))
+    except Exception:
+        pass
+    return rows
+
+
 def init_all():
-    """Start the drivers that are not started elsewhere: sound and USB."""
+    """Start the drivers that are not started elsewhere: printer ports, sound and USB."""
     from kernel import log
     started = []
+    try:
+        from kernel import lpt
+        if lpt.init():
+            started.append("printer ports (%s)" % ", ".join(p.name for p in lpt.ports))
+    except Exception as e:
+        log.warn("lpt: %r" % e)
     names = {r[3] for r in table()}
-    if "ac97" in names:
+    if "ac97" in names or "hda" in names:
         from kernel import sound
         if sound.init():
             started.append("sound")

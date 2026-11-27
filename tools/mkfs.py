@@ -1,8 +1,8 @@
-"""Pack pyfs/ (PyKernel) and pyos/ (PyOS, the operating system on top) into
+"""Pack pyfs/ (PyKernel) and pyos/ (SnakeyOS, the operating system on top) into
 the boot archive the kernel loads as its root filesystem.
 
 The two trees are laid over each other: pyos/lib/desktop ends up at
-/lib/desktop, next to the kernel's /lib/kernel. PYKERNEL_ONLY=1 leaves PyOS
+/lib/desktop, next to the kernel's /lib/kernel. PYKERNEL_ONLY=1 leaves SnakeyOS
 out, for a bare kernel that boots to the Python prompt.
 
 Format: b"PYFS", u32 file count, then per file: u16 name length, u32 data

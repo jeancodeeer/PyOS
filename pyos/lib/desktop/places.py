@@ -49,10 +49,10 @@ def ensure():
     welcome = desktop() + "/Bienvenida.txt"
     if not _exists(welcome) and not _exists(base + "/.bienvenida"):
         with open(welcome, "w") as f:
-            f.write("Bienvenido a PyOS.\n\n"
+            f.write("Bienvenido a SnakeyOS.\n\n"
                     "- Clic derecho en el escritorio: nueva carpeta, nuevo documento, fondo.\n"
                     "- Doble clic en un icono para abrirlo; arrastralo para moverlo.\n"
-                    "- El boton PyOS (arriba a la izquierda) abre el lanzador.\n"
+                    "- El boton SnakeyOS (arriba a la izquierda) abre el lanzador.\n"
                     "- Las apps son archivos .py: instala mas desde la Tienda.\n")
         with open(base + "/.bienvenida", "w") as f:
             f.write("1")
@@ -149,15 +149,23 @@ def kind(path_):
     low = path_.lower()
     if low.endswith(IMAGES):
         return "image"
-    if low.endswith(".wav"):
+    if low.endswith((".wav", ".mp3", ".m4a")):
         return "sound"
+    if low.endswith((".mp4", ".m4v", ".mov")):
+        return "video"
     if low.endswith((".html", ".htm")):
         return "web"
     if low.endswith(".py"):
         from desktop import apps
         return "app" if apps.read_header(path_) else "python"
-    if low.endswith(".csv"):
+    if low.endswith((".csv", ".xlsx")):
         return "sheet"
+    if low.endswith(".docx"):
+        return "document"
+    if low.endswith(".pptx"):
+        return "slides"
+    if low.endswith(".pdf"):
+        return "pdf"
     if low.endswith(".exe"):
         return "exe"
     return "text"
@@ -173,7 +181,9 @@ def open_path(path_):
     if k == "image":
         return w.launch("images", path_)
     if k == "sound":
-        return w.launch("music", path_)
+        return w.launch("videos" if path_.lower().endswith(".m4a") else "music", path_)
+    if k == "video":
+        return w.launch("videos", path_)
     if k == "web":
         return w.launch("browser", "file://" + path_)
     if k == "app":
@@ -185,6 +195,12 @@ def open_path(path_):
         return host.start(path_)
     if k == "sheet" and "hoja" in apps.app_files():
         return w.launch("hoja", path_)
+    if k == "document" and "escritor" in apps.app_files():
+        return w.launch("escritor", path_)
+    if k == "slides" and "presentaciones" in apps.app_files():
+        return w.launch("presentaciones", path_)
+    if k == "pdf":
+        return w.launch("browser", "file://" + path_)
     if k == "text" and "bloc" in apps.app_files():
         return w.launch("bloc", path_)          # plain text: the notepad; Python code: the editor
     return w.launch("editor", path_)

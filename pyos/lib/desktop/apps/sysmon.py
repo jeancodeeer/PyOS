@@ -12,7 +12,7 @@ class Monitor(App):
     def __init__(self, win):
         App.__init__(self, win)
         self.tab = 0
-        self.tabs = ["Procesos", "Memoria", "Red", "Registro"]
+        self.tabs = ["Procesos", "Rendimiento", "Red", "Registro"]
         self.form = ui.Form()
         for i, name in enumerate(self.tabs):
             self.form.add(ui.Button((8 + 104 * i, 6, 100, 24), name, lambda i=i: self.set_tab(i)))
@@ -20,7 +20,9 @@ class Monitor(App):
         self.kill_btn = self.form.add(ui.Button((8, 400, 140, 24), "Terminar proceso", self.kill))
         self.view = self.form.add(ui.TextView((8, 38, 620, 360), []))
         self.next = 0
-        self.history = []
+        self.history = []                      # RAM in use, one point a second
+        self.cpu = []                          # desktop CPU load, one point a second
+        self.lines_perf = []
         self.message = ""
         self.set_tab(0)
 
@@ -28,7 +30,7 @@ class Monitor(App):
         self.tab = i
         self.list.visible = i == 0
         self.kill_btn.visible = i == 0
-        self.view.visible = i != 0
+        self.view.visible = i not in (0, 1)
         self.next = 0
 
     def resized(self, w, h):
@@ -51,17 +53,21 @@ class Monitor(App):
             self.list.selected = min(max(0, sel), len(rows) - 1)
         elif self.tab == 1:
             from kernel import mm
+            from desktop import wm
             s = mm.stats()
-            free, used = gc.mem_free(), gc.mem_alloc()
-            self.history = (self.history + [used])[-60:]
-            lines = ["RAM total:          %6d MiB" % (s["total"] >> 20),
-                     "RAM sin asignar:    %6d MiB" % (s["free"] >> 20),
-                     "Heap de Python:     %6d MiB" % (s["heap"] >> 20),
-                     "  usado:            %6d KiB" % (used >> 10),
-                     "  libre:            %6d KiB" % (free >> 10),
-                     "Espacios de memoria: %d (%d KiB)" % (s["spaces"], s["space_bytes"] >> 10),
-                     "Tiempo encendido:   %d s" % (timer.ms() // 1000)]
-            self.view.lines = lines
+            used = s["total"] - s["free"]
+            self.history = (self.history + [used / float(s["total"] or 1)])[-60:]
+            self.cpu = (self.cpu + [getattr(wm.wm, "cpu_load", 0.0)])[-60:]
+            up = timer.ms() // 1000
+            self.lines_perf = [
+                "CPU (escritorio): %d %%" % int(self.cpu[-1] * 100),
+                "RAM en uso: %d de %d MiB (%d %%)" % (used >> 20, s["total"] >> 20, int(self.history[-1] * 100)),
+                "Python: %d MiB usados, %d MiB libres" % (s["python_used"] >> 20, s["python_free"] >> 20),
+                "Reserva para crecer: %d de %d MiB libres" % (s["reserve_free"] >> 20, s["reserve"] >> 20),
+                "Espacios de memoria: %d (%d KiB)" % (s["spaces"], s["space_bytes"] >> 10),
+                "Procesos: %d   hilos: %d" % (len(proc.table), len(thread.info())),
+                "Encendido: %d:%02d:%02d" % (up // 3600, up // 60 % 60, up % 60)]
+            self.view.lines = []
         elif self.tab == 2:
             from kernel import net
             self.view.lines = (net.summary() + "\n\n" + (net.connections() or "sin conexiones")).split("\n")
@@ -93,17 +99,31 @@ class Monitor(App):
         for i, b in enumerate(self.form.widgets[:4]):
             b.primary = i == self.tab
         self.form.draw(surf)
-        if self.tab == 1 and self.history:
-            x0, y0, w, h = 330, 60, self.win.w - 350, 120
-            pygame.draw.rect(surf, T.FIELD, (x0, y0, w, h))
-            pygame.draw.rect(surf, T.FIELD_BORDER, (x0, y0, w, h), 1)
-            top = max(self.history) or 1
-            pts = [(x0 + i * w // 60, y0 + h - 2 - (v * (h - 4) // top)) for i, v in enumerate(self.history)]
-            if len(pts) > 1:
-                pygame.draw.lines(surf, T.ACCENT, False, pts, 2)
-            ui.text(surf, "heap usado (60 s)", x0 + 4, y0 + h + 4, T.MUTED)
+        if self.tab == 1:
+            w = (self.win.w - 40) // 2
+            self.graph(surf, (12, 44, w, 150), self.cpu, "CPU", (80, 160, 255))
+            self.graph(surf, (28 + w, 44, w, 150), self.history, "Memoria", (170, 90, 230))
+            for k, line in enumerate(self.lines_perf):
+                ui.text(surf, line, 16, 230 + 22 * k, T.TEXT, ui.font(14))
         if self.tab == 0:
             ui.text(surf, self.message, 156, self.win.h - 28, T.MUTED)
+
+    def graph(self, surf, rect, values, name, color):
+        """A line of the last 60 seconds, 0..100 %, with the area under it filled."""
+        x0, y0, w, h = rect
+        pygame.draw.rect(surf, T.FIELD, rect)
+        for k in range(1, 4):                                # grid lines at 25, 50, 75 %
+            pygame.draw.line(surf, T.FIELD_BORDER, (x0, y0 + h * k // 4), (x0 + w, y0 + h * k // 4))
+        pygame.draw.rect(surf, T.FIELD_BORDER, rect, 1)
+        pts = [(x0 + w - (len(values) - 1 - i) * w // 59, y0 + h - 1 - int(min(1.0, v) * (h - 2)))
+               for i, v in enumerate(values)]
+        if len(pts) > 1:
+            pygame.draw.polygon(surf, tuple(c // 3 + 2 * b // 3 for c, b in zip(color, T.FIELD)),
+                                pts + [(pts[-1][0], y0 + h - 1), (pts[0][0], y0 + h - 1)])
+            pygame.draw.lines(surf, color, False, pts, 2)
+        now = "%d %%" % int(values[-1] * 100) if values else ""
+        ui.text(surf, name + "  " + now, x0, y0 + h + 6, T.TEXT, ui.font(14, True))
+        ui.text(surf, "60 s", x0 + w - 30, y0 + h + 6, T.MUTED, ui.font(12))
 
     def event(self, ev, pos):
         return self.form.event(ev, pos)

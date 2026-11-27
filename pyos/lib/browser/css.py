@@ -31,7 +31,7 @@ UA = """
 html, body, div, p, h1, h2, h3, h4, h5, h6, ul, ol, li, dl, dt, dd, pre, blockquote, form, table, header, footer,
 nav, section, article, aside, main, figure, figcaption, address, hr, fieldset, details, summary, center,
 legend, hgroup, menu, dir, noscript, search { display: block }
-head, script, style, title, meta, link, base, template, noembed, iframe, object, embed, svg, canvas, video,
+head, script, style, title, meta, link, base, template, noembed, iframe, object, embed, canvas, video,
 audio, map, area, param, source, track, datalist, dialog, [hidden], input[type=hidden] { display: none }
 li { display: list-item }
 table { display: table; border-spacing: 2px }
@@ -56,13 +56,17 @@ center { text-align: center }
 small, sub, sup { font-size: 0.83em } big { font-size: 1.17em }
 mark { background-color: yellow }
 button, input, select, textarea { display: inline-block }
-img { display: inline-block }
+img, svg { display: inline-block }
+details:not([open]) > :not(summary) { display: none }
+summary { display: list-item; list-style-type: disclosure-closed }
 br { display: inline }
 """
 
 
 def split_top(text, sep):
     """Split at `sep` where it is not inside (), [] or quotes."""
+    if "(" not in text and "[" not in text and '"' not in text and "'" not in text:
+        return text.split(sep)                       # the usual case, done by the C split
     out, cur, depth, quote = [], "", 0, None
     for ch in text:
         if quote:
@@ -85,6 +89,8 @@ def split_top(text, sep):
 
 def tokens(value):
     """Split a CSS value at spaces and commas, but not inside parentheses."""
+    if "(" not in value:
+        return value.replace(",", " ").split()
     out, cur, depth = [], "", 0
     for ch in value:
         if ch == "(":
@@ -143,9 +149,39 @@ def _color(value):
             return _hsl(h, s, l)
         except (ValueError, IndexError):
             return None
+    if v.startswith(("oklch(", "oklab(")):
+        inner = v[v.index("(") + 1:v.rindex(")")].split("/")[0].replace(",", " ").split()
+        try:
+            L = float(inner[0][:-1]) / 100 if inner[0].endswith("%") else float(inner[0])
+            if v.startswith("oklch("):
+                import math
+                C = float(inner[1][:-1]) * 0.004 if inner[1].endswith("%") else float(inner[1])
+                hue = float(inner[2].replace("deg", "")) if inner[2] != "none" else 0.0
+                a, b = C * math.cos(math.radians(hue)), C * math.sin(math.radians(hue))
+            else:
+                a, b = float(inner[1]), float(inner[2])
+            return _oklab(L, a, b)
+        except (ValueError, IndexError):
+            return None
     if v == "transparent":
         return "transparent"
     return None
+
+
+def _oklab(L, a, b):
+    """OKLab -> sRGB (0..255)."""
+    l_ = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3
+    m_ = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3
+    s_ = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3
+    rgb = (4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
+           -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
+           -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_)
+    out = []
+    for c in rgb:
+        c = max(0.0, min(1.0, c))
+        c = 12.92 * c if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
+        out.append(int(round(c * 255)))
+    return tuple(out)
 
 
 def _hsl(h, s, l):
@@ -167,6 +203,9 @@ def _hsl(h, s, l):
     return (int(r * 255), int(g * 255), int(b * 255))
 
 
+VW, VH = 1000, 700               # the viewport (the browser window), for vw and vh
+
+
 def length(value, font_size=16, relative_to=None):
     """A CSS length in pixels; percentages need relative_to. None if not a length."""
     v = value.strip().lower()
@@ -174,6 +213,8 @@ def length(value, font_size=16, relative_to=None):
         return None
     if v in ("0", "auto"):
         return 0 if v == "0" else None
+    if v.endswith(")") and v.startswith(("calc(", "min(", "max(", "clamp(", "-webkit-calc(")):
+        return _math(v, font_size, relative_to)
     try:
         if v.endswith("px"):
             return int(float(v[:-2]))
@@ -185,10 +226,14 @@ def length(value, font_size=16, relative_to=None):
             return int(float(v[:-2]) * 8)
         if v.endswith("pt"):
             return int(float(v[:-2]) * 4 / 3)
-        if v.endswith("vw"):
-            return int(float(v[:-2]) * 10)
-        if v.endswith("vh"):
-            return int(float(v[:-2]) * 7)
+        if v.endswith(("vw", "dvw", "svw", "lvw")):
+            return int(float(v[:-2].rstrip("dsl")) * VW / 100)
+        if v.endswith(("vh", "dvh", "svh", "lvh")):
+            return int(float(v[:-2].rstrip("dsl")) * VH / 100)
+        if v.endswith("vmin"):
+            return int(float(v[:-4]) * min(VW, VH) / 100)
+        if v.endswith("vmax"):
+            return int(float(v[:-4]) * max(VW, VH) / 100)
         if v.endswith("%"):
             if relative_to is None:
                 return ("%", float(v[:-1]))
@@ -196,6 +241,119 @@ def length(value, font_size=16, relative_to=None):
         return int(float(v))
     except ValueError:
         return None
+
+
+def _math(v, font_size, relative_to):
+    """calc(), min(), max(), clamp(): worked out in pixels. A percentage with
+    nothing to be a percentage of counts as a share of the viewport width."""
+    base = relative_to if relative_to is not None else VW
+    name = v[:v.index("(")].replace("-webkit-", "")
+    inner = v[v.index("(") + 1:-1]
+    if name != "calc":
+        vals = [_math("calc(" + a.strip() + ")", font_size, base) for a in split_top(inner, ",")]
+        vals = [x for x in vals if isinstance(x, int)]
+        if not vals:
+            return None
+        if name == "min":
+            return min(vals)
+        if name == "max":
+            return max(vals)
+        return max(vals[0], min(vals[1], vals[2])) if len(vals) == 3 else vals[0]
+    # calc: numbers and lengths with + - * / and brackets, read left to right
+    toks, i, n = [], 0, len(inner)
+    while i < n:
+        c = inner[i]
+        if c.isspace():
+            i += 1
+        elif c in "()*/":
+            toks.append(c)
+            i += 1
+        elif c in "+-" and (not toks or toks[-1] in "(*/+-") and i + 1 < n and (inner[i + 1].isdigit() or inner[i + 1] == "."):
+            j = i + 1
+            while j < n and not inner[j].isspace() and inner[j] not in "()*/":
+                j += 1
+            toks.append(inner[i:j])
+            i = j
+        elif c in "+-":
+            toks.append(c)
+            i += 1
+        else:
+            j = i
+            depth = 0
+            while j < n and (depth or (not inner[j].isspace() and inner[j] not in ")*/")):
+                if inner[j] == "(":
+                    depth += 1
+                elif inner[j] == ")":
+                    depth -= 1
+                j += 1
+            toks.append(inner[i:j])
+            i = j
+    pos = [0]
+
+    def value(t):
+        if t.replace(".", "", 1).lstrip("-+").isdigit():
+            return float(t)                              # a plain number (for * and /)
+        if "(" in t:
+            r = length(t, font_size, base)
+        else:
+            r = length(t, font_size, base)
+        return float(r) if isinstance(r, int) else 0.0
+
+    def atom():
+        t = toks[pos[0]] if pos[0] < len(toks) else "0"
+        pos[0] += 1
+        if t == "(":
+            r = expr()
+            pos[0] += 1                                  # the ")"
+            return r
+        return value(t)
+
+    def term():
+        r = atom()
+        while pos[0] < len(toks) and toks[pos[0]] in ("*", "/"):
+            op = toks[pos[0]]
+            pos[0] += 1
+            b = atom()
+            r = r * b if op == "*" else (r / b if b else r)
+        return r
+
+    def expr():
+        r = term()
+        while pos[0] < len(toks) and toks[pos[0]] in ("+", "-"):
+            op = toks[pos[0]]
+            pos[0] += 1
+            b = term()
+            r = r + b if op == "+" else r - b
+        return r
+
+    try:
+        return int(expr())
+    except (IndexError, ValueError, ZeroDivisionError):
+        return None
+
+
+def substitute(value, variables, depth=0):
+    """Replace var(--name, fallback) with the variable's value."""
+    while "var(" in value and depth < 8:
+        i = value.find("var(")
+        j, level = i + 4, 1
+        while j < len(value) and level:
+            if value[j] == "(":
+                level += 1
+            elif value[j] == ")":
+                level -= 1
+            j += 1
+        inner = value[i + 4:j - 1]
+        parts = split_top(inner, ",")
+        name = parts[0].strip()
+        got = variables.get(name)
+        if got is None:
+            got = variables.get(name.lower())
+        if got is None:
+            got = ",".join(parts[1:]).strip() if len(parts) > 1 else ""
+        value = value[:i] + got + value[j:]
+        depth += 1
+    return value
 
 
 # ---- parsing ----
@@ -246,8 +404,10 @@ def _sides(values):
 
 def expand(name, value):
     """Shorthands -> longhands."""
+    if "var(" in value and not name.startswith("--"):
+        return [(name, value)]              # expanded once the variable is known (compute)
     if name in ("margin", "padding"):
-        t, r, b, l = _sides(value.split())
+        t, r, b, l = _sides(tokens(value) or ["0"])
         return [(name + "-top", t), (name + "-right", r), (name + "-bottom", b), (name + "-left", l)]
     if name in ("border", "border-top", "border-bottom", "border-left", "border-right"):
         out = []
@@ -271,13 +431,19 @@ def expand(name, value):
                     out.append(("border-%s-width" % side, "1px"))
         return out
     if name == "border-width":
-        t, r, b, l = _sides(value.split())
+        t, r, b, l = _sides(tokens(value) or ["0"])
         return [("border-top-width", t), ("border-right-width", r), ("border-bottom-width", b), ("border-left-width", l)]
-    if name == "background":
+    if name in ("background", "background-image"):
         for word in tokens(value):
             c = color(word)
             if c is not None:
                 return [("background-color", word)]
+            if "gradient(" in word:                 # a gradient: its first colour, roughly
+                for inner in tokens(word[word.index("(") + 1:-1]):
+                    if color(inner) not in (None, "transparent"):
+                        return [("background-color", inner)]
+        if name == "background-image":
+            return []
         if value.strip() in ("none", "transparent"):
             return [("background-color", "transparent")]
         return []
@@ -300,15 +466,53 @@ def expand(name, value):
     if name == "text-decoration-line":
         return [("text-decoration", value)]
     if name == "gap":
-        return [("gap", value)]
+        parts = tokens(value)
+        return [("row-gap", parts[0]), ("column-gap", parts[-1])]
+    if name == "flex":
+        v = value.strip().lower()
+        if v == "none":
+            return [("flex-grow", "0"), ("flex-shrink", "0"), ("flex-basis", "auto")]
+        if v == "auto":
+            return [("flex-grow", "1"), ("flex-shrink", "1"), ("flex-basis", "auto")]
+        parts = v.split()
+        out, nums = [], [w for w in parts if w.replace(".", "", 1).isdigit()]
+        basis = [w for w in parts if w not in nums]
+        out.append(("flex-grow", nums[0] if nums else "1"))
+        out.append(("flex-shrink", nums[1] if len(nums) > 1 else "1"))
+        out.append(("flex-basis", basis[0] if basis else "0%"))
+        return out
+    if name == "flex-flow":
+        out = []
+        for w in value.split():
+            out.append(("flex-wrap" if "wrap" in w else "flex-direction", w))
+        return out
+    if name == "place-items":
+        return [("align-items", value.split()[0])]
+    if name == "grid-column" or name == "grid-area":
+        return [("grid-column", value)]
     return [(name, value)]
 
 
+# pseudo-classes and pseudo-elements this browser is never in (no hover, no focus...) or
+# never draws: a rule about them is dropped when the sheet is read
+NEVER = ("hover", "focus", "active", "before", "after", "visited", "checked", "disabled", "target", "placeholder",
+         "selection", "-", "file-selector-button", "backdrop", "host", "marker", "first-line", "first-letter",
+         "cue", "part(", "slotted(", "spelling-error", "grammar-error", "view-transition", "autofill",
+         "invalid", "user-invalid", "fullscreen", "modal", "popover-open", "open", "indeterminate", "read-write",
+         "default", "in-range", "out-of-range", "target-text", "picture-in-picture", "playing", "paused")
+
+
 class Rule:
-    __slots__ = ("selector", "decls", "spec", "order", "need")
+    __slots__ = ("selector", "decls", "spec", "order", "need", "trivial", "vars")
 
     def __init__(self, selector, decls, spec, order):
         self.selector, self.decls, self.spec, self.order = selector, decls, spec, order
+        self.vars = any(n[:2] == "--" or "var(" in v for n, v, _ in decls)   # custom properties in it
+        # ".x", "p" or "#y" alone: every element the index offers for it matches, no need to check
+        compounds = selector[0]
+        tag, ident, classes, attrs, pseudos = compounds[0]
+        self.trivial = len(compounds) == 1 and not attrs and not pseudos and \
+            (bool(tag) + bool(ident) + len(classes)) <= 1
         # tags/classes/ids some ancestor must have (descendant and child combinators)
         need = []
         compounds, combs = selector
@@ -324,8 +528,53 @@ class Rule:
         self.need = need
 
 
+def _name(s, i):
+    """A class or id name starting at i, with CSS escapes ('md\\:flex'): (name, end)."""
+    out, n = "", len(s)
+    while i < n and s[i] not in ".#[:":
+        if s[i] == "\\" and i + 1 < n:
+            j = i + 1
+            hexd = ""
+            while j < n and len(hexd) < 6 and s[j] in "0123456789abcdefABCDEF":
+                hexd += s[j]
+                j += 1
+            if hexd:                                   # \31 0 -> "10"
+                out += chr(int(hexd, 16))
+                i = j + 1 if j < n and s[j] == " " else j
+                continue
+            out += s[i + 1]
+            i += 2
+            continue
+        out += s[i]
+        i += 1
+    return out, i
+
+
 def _split_compound(s):
     """'div.a#b[x]:hover' -> (tag, id, classes, attrs, pseudos)."""
+    if "[" not in s and ":" not in s and "\\" not in s:
+        # the usual case (div, .a, div.a.b, #x): split by the C methods, not char by char
+        tag, ident, classes = None, None, []
+        i = 0
+        while i < len(s) and s[i] not in ".#":
+            i += 1
+        if i:
+            tag = s[:i].lower()
+            if tag == "*":
+                tag = None
+        rest = s[i:]
+        if "#" in rest:
+            parts = rest.replace("#", ".#").split(".")
+        else:
+            parts = rest.split(".")
+        for part in parts:
+            if not part:
+                continue
+            if part[0] == "#":
+                ident = part[1:]
+            else:
+                classes.append(part)
+        return (tag, ident, classes, [], [])
     tag, ident, classes, attrs, pseudos = None, None, [], [], []
     i, n = 0, len(s)
     start = i
@@ -338,13 +587,11 @@ def _split_compound(s):
     while i < n:
         c = s[i]
         if c in ".#":
-            j = i + 1
-            while j < n and s[j] not in ".#[:":
-                j += 1
+            name, j = _name(s, i + 1)
             if c == ".":
-                classes.append(s[i + 1:j])
+                classes.append(name)
             else:
-                ident = s[i + 1:j]
+                ident = name
             i = j
         elif c == "[":
             j = s.find("]", i)
@@ -376,8 +623,15 @@ def _split_compound(s):
                 name = p[:k]
                 if name in ("is", "where", "matches", "-webkit-any", "not"):
                     alts = [a.strip() for a in split_top(p[k + 1:-1], ",")]
-                    p = (name, [_split_compound(a) for a in alts if a and " " not in a and ">" not in a],
-                         any(" " in a or ">" in a for a in alts))
+                    simple = [_split_compound(a) for a in alts if a and not any(ch in a for ch in " >+~")]
+                    complex_ = []                       # '.dark *', 'nav > a': whole selectors
+                    for a in alts:
+                        if a and any(ch in a for ch in " >+~"):
+                            try:
+                                complex_.append(parse_selector(a))
+                            except Exception:
+                                pass
+                    p = (name, simple, complex_)
             pseudos.append(p)
             i = j
         else:
@@ -387,6 +641,10 @@ def _split_compound(s):
 
 def parse_selector(text):
     """'div > p.x a' -> [(compound, combinator_to_the_left), ...] right to left."""
+    if not any(c in text for c in ">+~([\"'"):
+        comps = [_split_compound(w) for w in text.split()]       # the usual case: descendants only
+        comps.reverse()
+        return comps, [" "] * len(comps)
     parts = []
     for word in split_top(" ".join(text.split()), " "):
         # a combinator glued to a compound ('a>b'), outside () and []
@@ -441,6 +699,7 @@ class StyleSheet:
         self.rules = []
         self.by_id, self.by_class, self.by_tag, self.universal = {}, {}, {}, []
         self.by_attr = {}
+        self.multi = False               # a rule is indexed under more than one key
         self.order = 0
 
     def add(self, text, viewport_w=1000):
@@ -457,7 +716,7 @@ class StyleSheet:
             if brace < 0:
                 break
             head = text[i:brace].strip().decode("utf-8", "replace")
-            if ";" in head and head.lstrip().startswith("@") and not head.lower().startswith(("@media", "@supports")):
+            if ";" in head and head.lstrip().startswith("@") and not head.lower().startswith(("@media", "@supports", "@layer")):
                 # '@import ...;' or '@charset ...;' before this block
                 cut = text.find(b";", i, brace)
                 i = cut + 1
@@ -468,8 +727,9 @@ class StyleSheet:
                 low = head.lower()
                 if low.startswith("@media") and _media_ok(low[6:], vw):
                     self._parse_block(inner, vw)
-                elif low.startswith("@supports"):
-                    self._parse_block(inner, vw)
+                elif low.startswith(("@supports", "@layer", "@container", "@scope", "@document", "@starting-style")) \
+                        and not low.startswith("@starting-style"):
+                    self._parse_block(inner, vw)        # Tailwind 4 puts every rule inside @layer
                 i = end + 1
                 continue
             close = text.find(b"}", brace)
@@ -489,9 +749,7 @@ class StyleSheet:
                         continue
                     # pseudo-elements and states we never are in: skip
                     last_pseudos = compounds[0][4]
-                    if any(isinstance(p, str) and p.startswith(("hover", "focus", "active", "before", "after", "visited",
-                                                                  "checked", "disabled", "target", "placeholder",
-                                                                  "selection", "-")) for p in last_pseudos):
+                    if any(isinstance(p, str) and p.startswith(NEVER) for p in last_pseudos):
                         continue
                     self.order += 1
                     rule = Rule((compounds, combs), decls, _specificity(compounds), self.order)
@@ -509,12 +767,25 @@ class StyleSheet:
         elif attrs:
             self.by_attr.setdefault(attrs[0][0], []).append(rule)
         else:
-            # ':is(a, b)' alone: index under each alternative's tag, if they all have one
+            # ':is(.a, b, #c)' alone: index under each alternative's id, class or tag, when they all
+            # have one: then it is only tried on elements that could match (not on every element)
+            if "root" in pseudos:
+                self.by_tag.setdefault("html", []).append(rule)
+                return
             for p in pseudos:
-                if isinstance(p, tuple) and p[0] in ("is", "where", "matches") and p[1] and not p[2] \
-                        and all(a[0] for a in p[1]):
-                    for a in p[1]:
-                        self.by_tag.setdefault(a[0], []).append(rule)
+                if isinstance(p, tuple) and p[0] in ("is", "where", "matches") and (p[1] or p[2]):
+                    # every alternative, simple or not, by its rightmost part
+                    alts = list(p[1]) + [sel[0][0] for sel in p[2] if sel[0]]
+                    if not all(a[1] or a[2] or a[0] for a in alts):
+                        continue
+                    self.multi = self.multi or len(alts) > 1
+                    for a in alts:
+                        if a[1]:
+                            self.by_id.setdefault(a[1], []).append(rule)
+                        elif a[2]:
+                            self.by_class.setdefault(a[2][0], []).append(rule)
+                        else:
+                            self.by_tag.setdefault(a[0], []).append(rule)
                     return
             self.universal.append(rule)
 
@@ -532,6 +803,13 @@ class StyleSheet:
             for name in node.attrs:
                 if name in self.by_attr:
                     out += self.by_attr[name]
+        if self.multi and len(out) > 1:
+            seen, uniq = set(), []
+            for r in out:
+                if id(r) not in seen:
+                    seen.add(id(r))
+                    uniq.append(r)
+            return uniq
         return out
 
 
@@ -556,35 +834,107 @@ def _match_brace(text, i):
 
 
 def _media_ok(query, vw):
-    q = query.strip()
-    if not q or "print" in q and "screen" not in q:
-        return "print" not in q
-    for part in q.split(","):
-        ok = True
+    """Does a media query hold for this browser? A screen vw wide, light colours,
+    a mouse, landscape. 'a, b' is "or"; 'and' joins conditions; 'not' turns it round."""
+    q = query.strip().lower()
+    if not q:
+        return True
+    for part in split_top(q, ","):
         p = part.strip()
-        if p.startswith("not "):
-            continue
-        if "print" in p or "speech" in p:
-            continue
-        for cond in p.replace("(", " ( ").replace(")", " ) ").split("("):
-            cond = cond.replace(")", "").strip()
-            if ":" in cond:
-                k, v = cond.split(":", 1)
-                k = k.strip()
-                px = length(v.strip())
-                if not isinstance(px, int):
-                    continue
-                if k == "max-width" and vw > px:
+        negate = p.startswith("not ")
+        if negate:
+            p = p[4:]
+        p = p.replace("only ", "")
+        ok = True
+        for cond in p.replace(" and ", "\n").replace(" or ", "\n").split("\n"):
+            cond = cond.strip()
+            if cond.startswith("not ") or cond.startswith("not("):
+                inner = cond[3:].strip()
+                if _media_feature(inner.strip("() "), vw):
                     ok = False
-                if k == "min-width" and vw < px:
+                continue
+            if cond.startswith("("):
+                if not _media_feature(cond.strip("() "), vw):
                     ok = False
-                if k in ("prefers-color-scheme",) and "dark" in v:
-                    ok = False
-                if k == "prefers-reduced-motion":
-                    pass
-        if ok:
+            elif cond in ("print", "speech", "tv", "handheld"):
+                ok = False
+            # "screen", "all": fine
+        if ok != negate:
             return True
     return False
+
+
+def _media_feature(f, vw):
+    if ":" not in f:
+        if any(op in f for op in ("<", ">")):          # range syntax: (width >= 600px), (400px <= width < 800px)
+            return _media_range(f, vw)
+        return f not in ("monochrome", "grid", "scan")    # (color), (hover)... : yes
+    k, v = f.split(":", 1)
+    k, v = k.strip(), v.strip()
+    px = length(v) if k.endswith(("width", "height")) else None
+    if k in ("max-width", "max-device-width"):
+        return isinstance(px, int) and vw <= px
+    if k in ("min-width", "min-device-width"):
+        return isinstance(px, int) and vw >= px
+    if k == "width":
+        return px == vw
+    if k == "max-height":
+        return isinstance(px, int) and VH <= px
+    if k == "min-height":
+        return isinstance(px, int) and VH >= px
+    if k == "prefers-color-scheme":
+        return v == "light"
+    if k == "prefers-reduced-motion":
+        return v == "reduce"                            # nothing moves here
+    if k in ("prefers-contrast", "forced-colors", "inverted-colors"):
+        return v in ("no-preference", "none")
+    if k in ("hover", "any-hover"):
+        return v == "hover"
+    if k in ("pointer", "any-pointer"):
+        return v == "fine"
+    if k == "orientation":
+        return v == "landscape"
+    if k in ("min-resolution", "min-device-pixel-ratio", "-webkit-min-device-pixel-ratio"):
+        return v.startswith(("1", "96dpi", "0"))
+    if k in ("max-resolution", "max-device-pixel-ratio", "-webkit-max-device-pixel-ratio"):
+        return True
+    if k == "display-mode":
+        return v == "browser"
+    return True
+
+
+def _media_range(f, vw):
+    w, cur, i = [], "", 0
+    while i < len(f):                                  # split at <, >, <=, >=
+        c = f[i]
+        if c in "<>":
+            if cur.strip():
+                w.append(cur.strip())
+            cur = ""
+            op = c + ("=" if f[i + 1:i + 2] == "=" else "")
+            w.append(op)
+            i += len(op)
+            continue
+        cur += c
+        i += 1
+    if cur.strip():
+        w.append(cur.strip())
+    vals = []
+    for t in w:
+        if t in ("width", "height"):
+            vals.append(vw if t == "width" else VH)
+        elif t in ("<=", ">=", "<", ">"):
+            vals.append(t)
+        else:
+            px = length(t)
+            if not isinstance(px, int):
+                return True
+            vals.append(px)
+    for i in range(1, len(vals) - 1, 2):
+        a, op, b = vals[i - 1], vals[i], vals[i + 1]
+        if not ((op == "<" and a < b) or (op == "<=" and a <= b) or (op == ">" and a > b) or (op == ">=" and a >= b)):
+            return False
+    return True
 
 
 def _compound_matches(node, comp):
@@ -619,7 +969,8 @@ def _compound_matches(node, comp):
     for p in pseudos:
         if isinstance(p, tuple):
             name, alts, complex_ = p
-            hit = any(_compound_matches(node, a) for a in alts)
+            hit = any(_compound_matches(node, a) for a in alts) or \
+                any(matches(node, sel) for sel in complex_ if sel[0])
             if name == "not":
                 if hit:
                     return False
@@ -640,12 +991,49 @@ def _compound_matches(node, comp):
         elif p in ("root",):
             if node.tag != "html":
                 return False
-        elif p.startswith("nth-child") or p.startswith("nth-of-type") or p in ("first-of-type", "last-of-type",
-                                                                                 "only-child", "empty"):
-            continue                        # approximated as matching
+        elif p.startswith(("nth-", "first-of-type", "last-of-type", "only-")) or p == "empty":
+            if not _structural(node, p):
+                return False
         else:
             return False
     return True
+
+
+def _structural(node, p):
+    """:nth-child(2n+1), :nth-of-type(3), :last-of-type, :only-child, :empty..."""
+    if p == "empty":
+        return not any(c.tag or c.text.strip() for c in node.children)
+    sibs = [c for c in node.parent.children if c.tag] if node.parent else [node]
+    if "of-type" in p:
+        sibs = [c for c in sibs if c.tag == node.tag]
+    if p in ("first-of-type",):
+        return sibs[0] is node
+    if p in ("last-of-type",):
+        return sibs[-1] is node
+    if p.startswith("only-"):
+        return len(sibs) == 1
+    k = sibs.index(node) + 1 if node in sibs else 1
+    if p.startswith("nth-last-"):
+        k = len(sibs) - k + 1
+    arg = p[p.find("(") + 1:p.rfind(")")].strip().lower().replace(" ", "") if "(" in p else "1"
+    if " of " in arg or "of" in arg and not arg.replace("of", "").strip():
+        return True
+    if arg == "odd":
+        a, b = 2, 1
+    elif arg == "even":
+        a, b = 2, 0
+    elif "n" in arg:
+        front, _, back = arg.partition("n")
+        a = -1 if front == "-" else 1 if front in ("", "+") else int(front)
+        b = int(back) if back else 0
+    else:
+        try:
+            return k == int(arg)
+        except ValueError:
+            return True
+    if a == 0:
+        return k == b
+    return (k - b) % a == 0 and (k - b) // a >= 0
 
 
 def matches(node, selector):
@@ -708,8 +1096,44 @@ def _keys(node):
     return out
 
 
+_NO_VARS = {}
+# converted values, shared by every element: pages repeat the same declarations thousands of times
+_VALUES = {}
+_MISSING, _SKIP, _INHERIT, _RESET, _CURRENT = object(), object(), object(), object(), object()
+
+
+def _convert(name, value, fs):
+    """One declaration's value as layout.py wants it (pixels, colours...), or a marker."""
+    v = value.strip()
+    low = v.lower()
+    if low == "inherit":
+        return _INHERIT
+    if low in ("initial", "unset", "revert", "revert-layer"):
+        return _RESET
+    if name in ("color", "background-color", "border-color"):
+        if low == "currentcolor":
+            return _CURRENT
+        c = color(v)
+        return _SKIP if c is None else c
+    if name in LENGTH_PROPS:
+        if low == "auto":
+            return "auto"
+        px = length(v, fs)
+        return _SKIP if px is None else px
+    if name == "font-weight":
+        return "bold" if low in ("bold", "bolder", "600", "700", "800", "900") else "normal"
+    return low
+# properties whose values are lengths (pixels)
+LENGTH_PROPS = set(["width", "max-width", "min-width", "height", "text-indent", "line-height", "gap", "min-height",
+                    "max-height", "border-spacing", "column-gap", "row-gap", "flex-basis"] +
+                   [a + "-" + b for a in ("margin", "padding") for b in ("top", "right", "bottom", "left")] +
+                   ["border-%s-width" % b for b in ("top", "right", "bottom", "left")])
+
+
 def compute(root, sheets, viewport_w=1000):
     """Set node.style (a dict) for every element under root."""
+    global VW
+    VW = viewport_w
     ua = ua_sheet()
     stack = [(root, ROOT_STYLE)]
     above = {}                       # tags/classes/ids of the current node's ancestors -> count
@@ -731,6 +1155,7 @@ def compute(root, sheets, viewport_w=1000):
                 stack.append((c, node.style))
             continue
         matched = []
+        uses_vars = False
         for sheet_rank, sheet in ((0, ua), ) + tuple((1, s) for s in sheets):
             for rule in sheet.candidates(node):
                 need = rule.need
@@ -742,9 +1167,12 @@ def compute(root, sheets, viewport_w=1000):
                             break
                     if not ok:
                         continue
-                if matches(node, rule.selector):
+                if rule.trivial or matches(node, rule.selector):
                     matched.append((sheet_rank, rule.spec, rule.order, rule.decls))
-        matched.sort(key=lambda m: (m[0], m[1], m[2]))
+                    if rule.vars:
+                        uses_vars = True
+        if len(matched) > 1:
+            matched.sort()                      # (sheet, specificity, order): order is unique, so decls never compared
         declared = {}
         important = {}
         for _, _, _, decls in matched:
@@ -752,6 +1180,8 @@ def compute(root, sheets, viewport_w=1000):
                 (important if imp else declared)[name] = value
         inline = node.attrs.get("style")
         if inline:
+            if "var(" in inline or "--" in inline:
+                uses_vars = True
             for name, value, imp in parse_declarations(inline):
                 (important if imp else declared)[name] = value
         declared.update(important)
@@ -760,6 +1190,25 @@ def compute(root, sheets, viewport_w=1000):
         for k in INHERITED:
             if k in parent_style:
                 style[k] = parent_style[k]
+        # custom properties (--name): inherited, and used through var()
+        variables = parent_style.get("--", _NO_VARS)
+        own = [(n, v) for n, v in declared.items() if n[:2] == "--"] if uses_vars else None
+        if own:
+            variables = dict(variables)
+            for n, v in own:
+                variables[n] = substitute(v.strip(), variables) if "var(" in v else v.strip()
+        style["--"] = variables
+        if uses_vars:
+            fixed = {}
+            for n, v in declared.items():
+                if n.startswith("--"):
+                    continue
+                if "var(" in v:
+                    for n2, v2 in expand(n, substitute(v, variables)):
+                        fixed[n2] = v2
+                else:
+                    fixed[n] = v
+            declared = fixed
         fs = parent_style.get("font-size", 16)
         if "font-size" in declared:
             v = declared["font-size"].strip().lower()
@@ -771,35 +1220,39 @@ def compute(root, sheets, viewport_w=1000):
             if isinstance(px, int) and px > 0:
                 style["font-size"] = px
         fs = style.get("font-size", fs)
+        cache = _VALUES
         for name, value in declared.items():
             if name == "font-size":
                 continue
-            v = value.strip()
-            low = v.lower()
-            if low == "inherit":
+            key = (name, value, fs)
+            got = cache.get(key, _MISSING)
+            if got is _MISSING:
+                got = _convert(name, value, fs)
+                if len(cache) > 20000:              # a bounded cache
+                    cache.clear()
+                cache[key] = got
+            if got is _SKIP:
+                continue
+            if got is _INHERIT:
                 if name in parent_style:
                     style[name] = parent_style[name]
-                continue
-            if low in ("initial", "unset", "revert"):
+            elif got is _RESET:
                 style.pop(name, None)
-                continue
-            if name in ("color", "background-color", "border-color"):
-                c = color(v)
+            elif got is _CURRENT:
+                c = style.get("color", parent_style.get("color"))
                 if c is not None:
                     style[name] = c
-            elif name.startswith(("margin", "padding", "border-")) and name.endswith(("top", "right", "bottom", "left", "width")) \
-                    or name in ("width", "max-width", "min-width", "height", "text-indent", "line-height", "gap",
-                                "min-height", "max-height", "border-spacing"):
-                if low == "auto":
-                    style[name] = "auto"
-                else:
-                    px = length(v, fs)
-                    if px is not None:
-                        style[name] = px
-            elif name == "font-weight":
-                style[name] = "bold" if low in ("bold", "bolder", "600", "700", "800", "900") else "normal"
             else:
-                style[name] = low
+                style[name] = got
+        if style.get("background-clip") == "text" or style.get("-webkit-background-clip") == "text":
+            bg = style.pop("background-color", None)        # gradient text: the gradient's colour, no box
+            if isinstance(bg, tuple):
+                style["color"] = bg
+        fill = style.get("-webkit-text-fill-color")
+        if fill and fill not in ("transparent", "currentcolor", "inherit"):
+            c = color(fill)
+            if isinstance(c, tuple):
+                style["color"] = c
         style.setdefault("display", "inline")
         if node.attrs.get("hidden") is not None:
             style["display"] = "none"

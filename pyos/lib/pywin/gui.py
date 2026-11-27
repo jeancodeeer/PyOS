@@ -1,9 +1,9 @@
 # The Windows GUI model shared by user32 (windows and messages), gdi32
-# (drawing) and the PyOS desktop (pywin/host.py).
+# (drawing) and the SnakeyOS desktop (pywin/host.py).
 #
 # Every window (HWND) has a pygame Surface the size of its client area.
 # The program draws into it through a DC (device context); the desktop
-# shows it in a PyOS window and turns the mouse and keyboard into messages.
+# shows it in a SnakeyOS window and turns the mouse and keyboard into messages.
 import pygame
 
 # messages
@@ -50,8 +50,7 @@ class Wnd:
         self.enabled = not style & WS_DISABLED
         self.invalid = True                       # needs a WM_PAINT
         self.erase = True
-        self.surface = pygame.Surface((self.w, self.h))
-        self.surface.fill(cls.background if cls else (240, 240, 240))
+        self._surface = None                      # made when first drawn on (see `surface`)
         self.user_data = 0
         self.extra = {}
         self.font = None
@@ -61,6 +60,30 @@ class Wnd:
         self.host = None                          # the desktop window showing it
 
     @property
+    def surface(self):
+        """The window's pixels. Made the first time something draws: programs
+        create many windows that are never shown (tooltips, hidden dialogs,
+        message windows), and each picture can take a megabyte or more."""
+        if self._surface is None:
+            try:
+                self._surface = pygame.Surface((self.w, self.h))
+            except MemoryError:                   # ask SnakeyOS for more room, once
+                from pywin.process import heap_area_for
+                heap_area_for(4 * self.w * self.h)
+                self._surface = pygame.Surface((self.w, self.h))
+            self._surface.fill(self.cls.background if self.cls else (240, 240, 240))
+        return self._surface
+
+    @surface.setter
+    def surface(self, value):
+        self._surface = value
+
+    def forget_pixels(self):
+        """Give the picture's memory back (for a hidden window); it is redrawn when needed."""
+        self._surface = None
+        self.invalid = self.erase = True
+
+    @property
     def top_level(self):
         return self.parent is None or not self.style & WS_CHILD
 
@@ -68,10 +91,10 @@ class Wnd:
         w, h = max(1, w), max(1, h)
         if (w, h) != (self.w, self.h):
             self.w, self.h = w, h
-            old = self.surface
-            self.surface = pygame.Surface((w, h))
-            self.surface.fill(self.cls.background if self.cls else (240, 240, 240))
-            self.surface.blit(old, (0, 0))
+            old = self._surface
+            self._surface = None
+            if old is not None:                       # keep what was drawn
+                self.surface.blit(old, (0, 0))
             self.invalid = self.erase = True
 
     def offset_in_top(self):
@@ -84,17 +107,26 @@ class Wnd:
             w = w.parent
         return x, y
 
+    # The children are kept as Windows keeps them: the first one is on top
+    # ("Z order"), and a new child goes to the bottom. A group box (the frame
+    # around radio buttons) is see-through: drawn first, never clicked.
+
+    def is_group_box(self):
+        return self.cls is not None and self.cls.name.lower() == "button" and self.style & 0xF == 7
+
     def child_at(self, pos):
-        """The deepest visible child window under pos (client coordinates)."""
-        for c in reversed(self.children):
-            if c.visible and c.x <= pos[0] < c.x + c.w and c.y <= pos[1] < c.y + c.h:
+        """The deepest visible child window under pos (client coordinates): the top one."""
+        for c in self.children:
+            if c.visible and not c.is_group_box() and c.x <= pos[0] < c.x + c.w and c.y <= pos[1] < c.y + c.h:
                 return c.child_at((pos[0] - c.x, pos[1] - c.y))
         return self, pos
 
     def compose(self, target, x=0, y=0):
-        """Draw this window and its children onto target."""
+        """Draw this window and its children onto target: bottom child first."""
         target.blit(self.surface, (x, y))
-        for c in self.children:
+        order = list(reversed(self.children))
+        order = [c for c in order if c.is_group_box()] + [c for c in order if not c.is_group_box()]
+        for c in order:
             if c.visible:
                 if c.cls and c.cls.render:
                     c.cls.render(c)               # a built-in control draws itself

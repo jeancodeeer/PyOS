@@ -27,7 +27,7 @@ class App(Base):
         self.last_find = ""
         self.menu = ui.MenuBar(win.w, [
             ("Archivo", [("Nuevo", self.new), ("Abrir...", self.ask_open), ("Guardar", self.save),
-                         ("Guardar como...", self.ask_save)]),
+                         ("Guardar como...", self.ask_save), None, ("Imprimir...", self.print)]),
             ("Editar", [("Copiar todo", lambda: clipboard.set("\n".join(self.lines))), ("Pegar", self.paste), None,
                         ("Buscar...", self.ask_find), ("Buscar siguiente (F3)", self.find_next),
                         ("Reemplazar...", self.ask_replace), None, ("Fecha y hora (F5)", self.insert_date)]),
@@ -66,6 +66,11 @@ class App(Base):
         except OSError as e:
             ui.toast("no se pudo guardar: %s" % e)
         self.update_title()
+
+    def print(self):
+        from pyos import printing
+        name = self.path.rsplit("/", 1)[-1] if self.path else "Sin titulo"
+        printing.print_from_app("\n".join(self.lines), name)
 
     def ask_save(self):
         ui.ask("Guardar como", "Ruta del archivo:", self.path or "/disk/Documentos/sin titulo.txt",

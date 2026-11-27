@@ -122,6 +122,27 @@ class HTTPResponse:
         self.close()
 
 
+# A proxy (Settings > Red, or urllib.request.set_proxy("host:port")): every
+# connection goes through it with CONNECT, so HTTPS stays encrypted end to end.
+PROXY = None                 # (host, port) or None
+
+
+def _tunnel(sock, host, port, timeout):
+    """Ask the proxy for a straight line to host:port."""
+    sock.sendall(("CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n\r\n" % (host, port, host, port)).encode())
+    reply = b""
+    while b"\r\n\r\n" not in reply:
+        chunk = sock.recv(512)
+        if not chunk:
+            break
+        reply += chunk
+        if len(reply) > 16384:
+            break
+    status = reply.split(b"\r\n", 1)[0].split()
+    if len(status) < 2 or status[1] != b"200":
+        raise OSError("the proxy refused %s:%d: %s" % (host, port, reply.split(b"\r\n", 1)[0].decode()))
+
+
 class HTTPConnection:
     default_port = HTTP_PORT
 
@@ -135,7 +156,11 @@ class HTTPConnection:
     def connect(self):
         self.sock = socket.socket()
         self.sock.settimeout(self.timeout)
-        self.sock.connect((self.host, self.port))
+        if PROXY:
+            self.sock.connect(PROXY)
+            _tunnel(self.sock, self.host, self.port, self.timeout)
+        else:
+            self.sock.connect((self.host, self.port))
 
     def request(self, method, url, body=None, headers=None):
         if self.sock is None:
@@ -183,6 +208,11 @@ class HTTPSConnection(HTTPConnection):
         ctx = self.context or ssl.create_default_context()
         raw = socket.socket()
         raw.settimeout(self.timeout)
+        if PROXY:                                    # through the proxy: TLS inside the tunnel
+            raw.connect(PROXY)
+            _tunnel(raw, self.host, self.port, self.timeout)
+            self.sock = ctx.wrap_socket(raw, server_hostname=self.host)
+            return
         self.sock = ctx.wrap_socket(raw, server_hostname=self.host)
         self.sock.connect((self.host, self.port))
 

@@ -7,7 +7,7 @@
 #
 # One Context draws into one pygame Surface. pygame.display.set_mode(size,
 # OPENGL) makes one for the screen; Context(surface) makes one for any
-# surface (a window on the PyOS desktop, for example).
+# surface (a window on the SnakeyOS desktop, for example).
 import array
 import math
 import micropython

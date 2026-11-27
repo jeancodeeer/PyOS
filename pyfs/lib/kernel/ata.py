@@ -1,16 +1,43 @@
-# IDE/ATA disk driver (PIO, LBA28) and persistent storage.
+# IDE/ATA disk driver (LBA28) and persistent storage.
 #
 # ATADisk is a block device: it only knows how to move 512-byte sectors.
+# It moves them by DMA when the IDE controller can ("bus master", as on
+# every PC and in QEMU): one command carries up to 128 sectors straight to
+# memory. Otherwise it uses PIO, the CPU copying the data word by word
+# through an I/O port, several sectors per command.
 # The on-disk format is FAT, so a disk written here can be opened on any
 # other computer. mount() attaches the first disk at /disk.
 import io
 import vfs
 import _thread
 import _kernel
-from _kernel import inb, outb
+from _kernel import inb, outb, inl, outl
 from kernel import timer
 
 SECTOR = 512
+DMA_SECTORS = 128                            # 64 KiB per DMA command
+READ_DMA, WRITE_DMA, READ_PIO, WRITE_PIO = 0xC8, 0xCA, 0x20, 0x30
+
+
+def bus_master_port(channel_base):
+    """The I/O port of the IDE controller's DMA engine for this channel, or None.
+    Also lets the controller use the memory bus (PCI "bus master" bit)."""
+    from kernel import pci
+    for bus, dev, fn, vendor, device, cls, sub in pci.scan():
+        if (cls, sub) != (0x01, 0x01):                 # mass storage, IDE
+            continue
+        bar4 = pci.read32(bus, dev, fn, 0x20)
+        if not bar4 & 1 or bar4 & ~3 == 0:
+            return None
+        cmd = pci.read32(bus, dev, fn, 0x04)
+        pci.write32(bus, dev, fn, 0x04, cmd | 0x05)    # I/O space + bus master
+        return (bar4 & ~3) + (0 if channel_base == 0x1F0 else 8)
+    return None
+
+
+def _kernel_poke16(addr, value):
+    from kernel import hw
+    hw.poke16(addr, value)
 
 
 class ATADisk:
@@ -19,6 +46,28 @@ class ATADisk:
         self.select = 0xF0 if slave else 0xE0
         outb(ctrl, 0x02)                     # no IRQs: this driver polls
         self.sectors = self._identify()
+        self.dma = None
+        try:
+            self._setup_dma()
+        except Exception:
+            self.dma = None                  # PIO it is
+
+    def _setup_dma(self):
+        """A 64 KiB buffer that does not cross a 64 KiB line (a DMA rule) and
+        a one-entry PRD table describing it."""
+        from kernel import mm, hw
+        port = bus_master_port(self.base)
+        if port is None:
+            return
+        raw = mm.alloc_contiguous(32)                   # 128 KiB: a 64 KiB-aligned half fits
+        buf = (raw + 0xFFFF) & ~0xFFFF
+        prd = hw.mem(raw if buf - raw >= 16 else buf + 0x10000, 8)
+        prd_addr = raw if buf - raw >= 16 else buf + 0x10000
+        prd[:] = (buf.to_bytes(4, "little") + (0).to_bytes(2, "little") +   # 0 = 64 KiB
+                  (0x8000).to_bytes(2, "little"))                         # last entry
+        self.dma = (port, prd_addr, buf, hw.mem(buf, DMA_SECTORS * SECTOR))
+        test = bytearray(SECTOR)
+        self._dma(0, 1, False, memoryview(test))        # it must really work, or we stay on PIO
 
     def _wait(self, want_data, timeout_s=5):
         for _ in range(4):                   # ~400 ns settle time
@@ -50,30 +99,85 @@ class ATADisk:
         _kernel.insw(base, ident)
         return int.from_bytes(ident[120:124], "little")
 
-    def _command(self, lba, cmd):
+    def _command(self, lba, cmd, count=1):
         base = self.base
         outb(base + 6, self.select | ((lba >> 24) & 0x0F))
-        outb(base + 2, 1)
+        outb(base + 2, count & 0xFF)              # 0 means 256
         outb(base + 3, lba & 0xFF)
         outb(base + 4, (lba >> 8) & 0xFF)
         outb(base + 5, (lba >> 16) & 0xFF)
         outb(base + 7, cmd)
 
+    def _dma(self, lba, count, write, view):
+        """Move count sectors between the disk and view, through the DMA buffer."""
+        port, prd_addr, buf, window = self.dma
+        size = count * SECTOR
+        if write:
+            window[:size] = view[:size]
+        outb(port, 0)                                    # engine stopped
+        outl(port + 4, prd_addr)                         # where the PRD table is
+        outb(port + 2, 0x06)                             # clear "interrupt" and "error"
+        dma_cmd = 0x00 if write else 0x08                # bit 3: the device writes to memory
+        outb(port, dma_cmd)
+        # the PRD entry says how many bytes this transfer is
+        _kernel_poke16(prd_addr + 4, size & 0xFFFF)
+        self._command(lba, WRITE_DMA if write else READ_DMA, count)
+        outb(port, dma_cmd | 1)                          # go
+        deadline = timer.ticks() + 5 * timer.HZ
+        spins = 0
+        while True:
+            st = inb(port + 2)
+            if not st & 1 or st & 4:                     # no longer active, or done
+                break
+            if timer.ticks() > deadline:
+                outb(port, 0)
+                raise OSError(110)
+            spins += 1
+            if spins > 20:                               # not done at once: let the CPU rest
+                _kernel.wait()                           # (the disk finishes while we halt)
+        outb(port, 0)
+        self._wait(False)
+        if st & 2:
+            raise OSError(5)
+        outb(port + 2, 0x06)
+        if not write:
+            view[:size] = window[:size]
+
+    def _pio(self, lba, count, write, view):
+        self._command(lba, WRITE_PIO if write else READ_PIO, count)
+        for i in range(count):
+            self._wait(True)
+            part = view[i * SECTOR:(i + 1) * SECTOR]
+            if write:
+                _kernel.outsw(self.base, part)
+            else:
+                _kernel.insw(self.base, part)
+        if write:
+            self._wait(False)
+
+    def _transfer(self, block, buf, write):
+        view = memoryview(buf)
+        total = len(buf) // SECTOR
+        done = 0
+        while done < total:
+            n = min(DMA_SECTORS, total - done)
+            part = view[done * SECTOR:(done + n) * SECTOR]
+            if self.dma is not None:
+                try:
+                    self._dma(block + done, n, write, part)
+                    done += n
+                    continue
+                except OSError:
+                    self.dma = None                      # the controller refused: PIO from now on
+            self._pio(block + done, n, write, part)
+            done += n
+
     # -- block device protocol --
     def readblocks(self, block, buf, offset=0):
-        view = memoryview(buf)
-        for i in range(len(buf) // SECTOR):
-            self._command(block + i, 0x20)
-            self._wait(True)
-            _kernel.insw(self.base, view[i * SECTOR:(i + 1) * SECTOR])
+        self._transfer(block, buf, False)
 
     def writeblocks(self, block, buf, offset=0):
-        view = memoryview(buf)
-        for i in range(len(buf) // SECTOR):
-            self._command(block + i, 0x30)
-            self._wait(True)
-            _kernel.outsw(self.base, view[i * SECTOR:(i + 1) * SECTOR])
-            self._wait(False)
+        self._transfer(block, buf, True)
 
     def flush(self):
         outb(self.base + 6, self.select)
@@ -255,12 +359,12 @@ def format(dev=None):
 
 
 def find_disk():
-    """The first disk: IDE, else SATA (AHCI), else NVMe."""
+    """The first disk: IDE, else SATA (AHCI), else NVMe, else virtio."""
     try:
         return ATADisk()
     except OSError as e:
         first_error = e
-    for name in ("ahci", "nvme"):
+    for name in ("ahci", "nvme", "virtio_blk"):
         try:
             found = __import__("kernel." + name, None, None, ["disks"]).disks()
         except Exception:

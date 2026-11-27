@@ -5,7 +5,8 @@
 #
 # A word processor: paragraphs with a style (title, subtitle, normal), bold,
 # alignment and colour. Formatting applies to the paragraph the cursor is
-# in. Documents are saved as HTML, so the web browser can show them too.
+# in. Documents are saved like Word does: .docx (Word, LibreOffice, Google
+# Docs open it), and also .pdf, .html (the web browser shows it) or .txt.
 import pygame
 from desktop import theme as T, ui, clipboard
 from desktop.wm import App as Base
@@ -33,7 +34,10 @@ class App(Base):
         self.modified = False
         self.menu = ui.MenuBar(win.w, [
             ("Archivo", [("Nuevo", self.new), ("Abrir...", self.ask_open), ("Guardar", self.save),
-                         ("Guardar como...", self.ask_save), None, ("Ver en el navegador", self.preview)]),
+                         ("Guardar como...", self.ask_save), None,
+                         ("Exportar a PDF", lambda: self.export("pdf")),
+                         ("Exportar a Word (.docx)", lambda: self.export("docx")), None,
+                         ("Ver en el navegador", self.preview), ("Imprimir...", self.print)]),
             ("Editar", [("Copiar todo el texto", lambda: clipboard.set(self.plain())), ("Pegar", self.paste)]),
         ])
         self.form = ui.Form()
@@ -114,23 +118,75 @@ class App(Base):
             out.append('<%s style="%s">%s</%s>' % (tag, css, _esc(par["text"]), tag))
         return "\n".join(out) + "\n</body></html>\n"
 
+    # ---- files: .docx like Word, and .pdf, .html, .txt ----
+    def office_pars(self):
+        """The paragraphs with real colours, as office/word.py wants them."""
+        return [dict(par, color=COLORS[par["color"]]) for par in self.pars]
+
+    def write(self, path):
+        from office import word, files
+        kind = files.ext(path)
+        title = path.rsplit("/", 1)[-1]
+        if kind == "docx":
+            data = word.to_docx(self.office_pars(), title)
+        elif kind == "pdf":
+            data = word.to_pdf(self.office_pars(), title)
+        elif kind == "txt":
+            data = word.to_text(self.pars)
+        else:
+            data = self.html()
+        files.write(path, data)
+
     def save(self):
         if not self.path:
             return self.ask_save()
-        with open(self.path, "w") as f:
-            f.write(self.html())
+        try:
+            self.write(self.path)
+        except OSError as e:
+            ui.toast("no se pudo guardar: %s" % e)
+            return
         self.modified = False
         self.update_title()
         ui.toast("guardado: " + self.path)
 
     def ask_save(self):
-        ui.ask("Guardar como", "Ruta del documento (.html):", self.path or "/disk/Documentos/documento.html",
-               lambda p: (setattr(self, "path", p if p.endswith((".html", ".htm")) else p + ".html"), self.save()))
+        def chosen(p):
+            from office import files
+            if files.ext(p) not in ("docx", "pdf", "html", "htm", "txt"):
+                p = files.with_ext(p, "docx")                     # like Word: .docx unless asked
+            self.path = p
+            self.save()
+        ui.ask("Guardar como", "Ruta (.docx, .pdf, .html o .txt):", self.path or "/disk/Documentos/documento.docx",
+               chosen)
+
+    def export(self, kind):
+        from office import files
+        path = files.with_ext(self.path or "/disk/Documentos/documento", kind)
+        try:
+            self.write(path)
+            ui.toast("exportado: " + path)
+        except OSError as e:
+            ui.toast("no se pudo exportar: %s" % e)
 
     def ask_open(self):
         ui.ask("Abrir", "Ruta del documento:", self.path or "/disk/Documentos/", self.open)
 
     def open(self, path):
+        from office import files
+        if files.ext(path) == "docx":
+            try:
+                from office import word
+                pars = word.from_docx(files.read(path))
+            except (OSError, ValueError) as e:
+                ui.toast("no se pudo abrir: %s" % e)
+                return
+            for par in pars:                                      # nearest of our colours
+                rgb = par["color"]
+                par["color"] = min(range(len(COLORS)), key=lambda i: sum((a - b) ** 2 for a, b in zip(COLORS[i], rgb)))
+            self.pars = pars or [new_par()]
+            self.path, self.p, self.col, self.modified = path, 0, 0, False
+            self.update_title()
+            return
         try:
             with open(path) as f:
                 text = f.read()
@@ -160,13 +216,20 @@ class App(Base):
         self.path, self.p, self.col, self.modified = path, 0, 0, False
         self.update_title()
 
+    def print(self):
+        from pyos import printing
+        name = self.path.rsplit("/", 1)[-1] if self.path else "Documento"
+        printing.print_from_app("\n\n".join(par["text"] for par in self.pars), name)
+
     def preview(self):
         if not self.path:
             ui.toast("guarda el documento primero")
             return
-        self.save()
+        from office import files
+        page = files.with_ext(self.path, "html")              # the browser shows the HTML copy
+        self.write(page)
         from desktop import wm
-        wm.wm.launch("browser", "file://" + self.path)
+        wm.wm.launch("browser", "file://" + page)
 
     # ---- layout ----
     def font(self, par):

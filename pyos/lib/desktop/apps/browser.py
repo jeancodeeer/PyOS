@@ -11,6 +11,9 @@ STATUS_H = 22
 SCROLLBAR = 12
 
 
+VIDEO_KINDS = (".mp4", ".m4v", ".mov", ".m4a", ".mp3")
+
+
 class Tab:
     def __init__(self, browser):
         self.browser = browser
@@ -27,7 +30,7 @@ class Tab:
         if "://" not in url and not url.startswith(("about:", "data:", "file:")):
             if " " in url or "." not in url:
                 from urllib.parse import quote_plus
-                url = "https://lite.duckduckgo.com/lite/?q=" + quote_plus(url)
+                url = "https://www.google.com/search?q=" + quote_plus(url)      # words: a Google search
             elif url.startswith("/"):
                 url = "file://" + url
             else:
@@ -36,6 +39,8 @@ class Tab:
             self.history = self.history[:self.pos + 1] + [url]
             self.pos = len(self.history) - 1
         frag = url.split("#", 1)[1] if "#" in url else None
+        if self.page is not None:
+            self.page.close()                      # its scripts stop
         self.page = P.Page(url.split("#")[0] if not url.startswith("about:") else url, self.browser.page_changed)
         self.page.fragment = frag
         self.scroll = 0
@@ -95,6 +100,8 @@ class Browser(App):
             t.go(P.HOME)
             return
         i = self.tabs.index(t)
+        if t.page is not None:
+            t.page.close()
         self.tabs.remove(t)
         self.tab = self.tabs[min(i, len(self.tabs) - 1)]
         self.sync_bar(self.tab)
@@ -162,10 +169,47 @@ class Browser(App):
             wm.wm.toast("marcador guardado: " + p.title[:40])
 
     def tick(self, now):
+        p = self.tab.page
+        if p is not None and p.js is not None and not p.loading and now - getattr(self, "_js_at", 0) >= 100:
+            self._js_at = now                        # the page's timers and promises, ten times a second
+            if p.js.tick():
+                self.tab.focus = None
+                self.sync_bar(self.tab)              # the title may have changed
+                self.dirty_page = True
+        if p is not None:
+            self._script_requests(p)
         if self.dirty_page:
             self.dirty_page = False
             return True
         return False
+
+    def _script_requests(self, p):
+        """What the page's scripts asked the browser to do."""
+        if p.navigate_to:
+            url, p.navigate_to = p.navigate_to, None
+            self.tab.go(url)
+        elif p.pending_submit is not None:
+            node, p.pending_submit = p.pending_submit, None
+            target = p.submit(node)
+            if target:
+                self.tab.go(*target)
+        if p.alert:
+            text, p.alert = p.alert, None
+            from desktop import wm
+            wm.wm.toast(text[:120])
+        if p.scroll_request is not None:
+            self.tab.scroll, p.scroll_request = max(0, p.scroll_request - 8), None
+            self.dirty_page = True
+
+    def js_event(self, node, kind, extra=None):
+        """Tell the page's scripts; False when they cancelled what would happen next."""
+        p = self.tab.page
+        if p is None or p.js is None or node is None:
+            return True
+        ok = p.js.event(node, kind, extra)
+        self.sync_bar(self.tab)
+        self.dirty_page = True
+        return ok
 
     # ---- drawing ----
     def draw(self, surf):
@@ -286,8 +330,18 @@ class Browser(App):
         if it is None:
             t.focus = None
             return True
+        if it.node is not None and t.page.js is not None:
+            if not self.js_event(it.node, "click"):
+                return True                          # the page's script handled it
+            it = t.page.item_at(x, y) or it          # the page may have changed under the mouse
+            if it.kind == "widget" and it.node is not None and it.node.tag == "button" and \
+                    it.node.attrs.get("type", "submit").lower() != "submit":
+                return True
         if it.kind == "widget":
             return self.click_widget(it.node)
+        if it.href and it.href.startswith("pyos-toggle:"):
+            t.page.toggle(it.href)
+            return True
         if it.href:
             self.follow(it.href, ui.ctrl(ev))
             return True
@@ -301,6 +355,11 @@ class Browser(App):
         if href.startswith("mailto:"):
             return
         cur = self.tab.page.url if self.tab.page else ""
+        target = href if href.startswith("pyos-video:") else (self.tab.page.resolve(href) if self.tab.page else href)
+        if target.startswith("pyos-video:") or target.lower().split("?")[0].endswith(VIDEO_KINDS):
+            from desktop import wm                       # videos and songs: the player, not a download
+            wm.wm.launch("videos", target[len("pyos-video:"):] if target.startswith("pyos-video:") else target)
+            return
         if "#" in href and href.split("#")[0] == cur.split("#")[0] and self.tab.page.layout:
             y = self.tab.page.layout.anchors.get(href.split("#", 1)[1])
             if y is not None:
@@ -319,6 +378,9 @@ class Browser(App):
         if node.tag == "button" or kind in ("submit", "image"):
             if node.tag == "button" and node.attrs.get("type", "submit").lower() not in ("submit",):
                 return True
+            form = p.form_of(node)
+            if form is not None and not self.js_event(form, "submit"):
+                return True                          # the page's script sends the form itself
             target = p.submit(node)
             if target:
                 url, data, method = target
@@ -433,6 +495,11 @@ class Browser(App):
         if k == pygame.K_ESCAPE:
             self.tab.focus = None
         elif k == pygame.K_RETURN and node.tag != "textarea":
+            if not self.js_event(node, "keydown", {"key": "Enter", "code": "Enter", "keyCode": 13}):
+                return True
+            form = p.form_of(node)
+            if form is not None and not self.js_event(form, "submit"):
+                return True
             target = p.submit(node)
             if target:
                 url, data, method = target
@@ -452,5 +519,7 @@ class Browser(App):
             st["value"] += ev.unicode
         else:
             return False
+        if p.js is not None:                         # the page's scripts see what is typed (search boxes...)
+            p.js.set_value(node, st["value"])
         self.dirty_page = True
         return True

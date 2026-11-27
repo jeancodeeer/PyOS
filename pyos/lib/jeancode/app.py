@@ -75,11 +75,16 @@ class Field:
 
 
 class App:
-    def __init__(self, size=None):
-        pygame.init()
-        flags = 0 if net.PYKERNEL else pygame.RESIZABLE
-        self.screen = pygame.display.set_mode(size or ((800, 600) if net.PYKERNEL else (1000, 680)), flags)
-        pygame.display.set_caption("JeanCode " + VERSION)
+    def __init__(self, size=None, surface=None):
+        # surface: draw into it (a window of the SnakeyOS desktop) instead of opening the screen
+        self.embedded = surface is not None
+        if self.embedded:
+            self.screen = surface
+        else:
+            pygame.init()
+            flags = 0 if net.PYKERNEL else pygame.RESIZABLE
+            self.screen = pygame.display.set_mode(size or ((800, 600) if net.PYKERNEL else (1000, 680)), flags)
+            pygame.display.set_caption("JeanCode " + VERSION)
         try:
             pygame.key.set_repeat(400, 35)
         except Exception:          # noqa: BLE001
@@ -172,7 +177,8 @@ class App:
         self.text(foot[: self.cols(W - 2 * PAD)], PAD, fy, ASH)
         area = (PAD, top + PAD, W - 2 * PAD - SHADOW, fy - top - 2 * PAD - 6)
         getattr(self, "draw_" + self.view)(area)
-        pygame.display.flip()
+        if not self.embedded:
+            pygame.display.flip()
 
     # ------------------------------------------------------------ chat
 
@@ -746,6 +752,15 @@ class App:
             self.history["sel"] = max(0, min(len(self.history["items"]) - 1, self.history["sel"] - dy))
         self.dirty = True
 
+    def step(self):
+        """The work of each frame besides drawing: notices that expire, saving."""
+        if self.notice and net.ticks_ms() > getattr(self, "notice_until", 0):
+            self.notice = ""
+            self.dirty = True
+        if self.need_save:
+            self.need_save = False
+            self.save_chat()
+
     def run(self):
         clock = pygame.time.Clock()
         try:
@@ -753,12 +768,7 @@ class App:
                 for ev in pygame.event.get():
                     if not self.handle(ev):
                         return
-                if self.notice and net.ticks_ms() > getattr(self, "notice_until", 0):
-                    self.notice = ""
-                    self.dirty = True
-                if self.need_save:
-                    self.need_save = False
-                    self.save_chat()
+                self.step()
                 if self.dirty:
                     self.dirty = False
                     self.draw()

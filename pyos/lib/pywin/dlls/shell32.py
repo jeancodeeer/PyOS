@@ -4,7 +4,7 @@ from pywin.dlls import Dll
 
 dll = Dll("shell32")
 
-# CSIDL numbers -> folders of the PyOS disk (C:\ is /disk)
+# CSIDL numbers -> folders of the SnakeyOS disk (C:\ is /disk)
 FOLDERS = {0x00: "Escritorio", 0x10: "Escritorio", 0x05: "Documentos", 0x0D: "Musica", 0x27: "Imagenes",
            0x1A: "AppData", 0x1C: "AppData", 0x23: "AppData", 0x28: "", 0x26: "Programas", 0x24: "Windows",
            0x25: "Windows"}
@@ -46,12 +46,31 @@ def SHGetSpecialFolderPathW(p, hwnd, out, csidl, create):
     return 1
 
 
+RUNNABLE = (".py", ".exe", ".com", ".bat", ".cmd", ".sh", ".msi", ".scr")
+SE_ERR_ACCESSDENIED, SE_ERR_FNF = 5, 2
+
+
 def _execute(p, what, params):
-    """Open a web page, a document or another program, the PyOS way."""
-    if what.lower().startswith(("http://", "https://")):
+    """Open a web page, a document or another program, the SnakeyOS way.
+    Starting a program (or installing a .py app) needs the user's yes:
+    otherwise any Windows program could start others behind their back."""
+    low = what.lower()
+    if low.startswith(("http://", "https://")):
         opener = getattr(p.ui, "open_url", None)
+    elif ":" in low.split("/")[0] and not (len(low) > 1 and low[1] == ":"):
+        p.warn("ShellExecute: esquema no permitido: " + what)          # mailto:, ms-settings:, ...
+        return SE_ERR_ACCESSDENIED
     else:
-        what = p.host_path(what)
+        try:
+            what = p.host_path(what)
+        except OSError:
+            return SE_ERR_ACCESSDENIED
+        if what.lower().endswith(RUNNABLE):
+            name = p.path.rsplit("/", 1)[-1]
+            ok = p.ui.choose("Ejecutar programa", "%s quiere ejecutar %s" % (name, what), ["Ejecutar"]) \
+                if hasattr(p.ui, "choose") else None
+            if ok is None:
+                return SE_ERR_ACCESSDENIED
         opener = getattr(p.ui, "open_path", None)
     if opener is None:
         p.ui.write("PyWin: abrir %s\n" % what)
@@ -105,3 +124,116 @@ def Shell_NotifyIconA(p, message, data):
 
 
 dll.alias("Shell_NotifyIconW", "Shell_NotifyIconA")
+
+
+# ---- more of shell32 ----
+
+S_OK, E_FAIL, E_NOTIMPL = 0, 0x80004005, 0x80004001
+
+
+@dll(1)
+def ShellExecuteExW(p, info):
+    verb, file, params = mem.u64(info + 16), mem.u64(info + 24), mem.u64(info + 32)
+    code = _execute(p, mem.wstr(file) if file else "", mem.wstr(params) if params else "")
+    mem.put64(info + 56, code)                               # hInstApp
+    if mem.u32(info) >= 112:
+        mem.put64(info + 104, 0)                             # no process handle to give
+    return 1
+
+
+@dll(4)
+def SHCreateItemFromParsingName(p, path, bind, iid, out):
+    mem.put64(out, 0)
+    return E_NOTIMPL
+
+
+@dll(5)
+def SHParseDisplayName(p, name, bind, out, attrs_in, attrs_out):
+    mem.put64(out, 0)
+    return E_FAIL
+
+
+@dll(4)
+def SHOpenFolderAndSelectItems(p, folder, n, items, flags):
+    return E_FAIL
+
+
+def _path_list(ptr):
+    """A list of paths ended by an empty one (two zero characters)."""
+    out = []
+    while ptr:
+        s = mem.wstr(ptr) or ""
+        if not s:
+            break
+        out.append(s)
+        ptr += 2 * (len(s) + 1)
+    return out
+
+
+FO_MOVE, FO_COPY, FO_DELETE, FO_RENAME = 1, 2, 3, 4
+
+
+@dll(1)
+def SHFileOperationW(p, op):
+    """Copy, move, rename or delete files (one level, no folders inside folders)."""
+    import os
+    func = mem.u32(op + 8)
+    try:
+        sources = [p.host_path(s, write=func != FO_COPY) for s in _path_list(mem.u64(op + 16))]
+        targets = [p.host_path(s, write=True) for s in _path_list(mem.u64(op + 24))]
+        for k, src in enumerate(sources):
+            if func == FO_DELETE:
+                os.remove(src)
+                continue
+            dst = targets[k] if k < len(targets) else (targets[0] if targets else "")
+            try:
+                if os.stat(dst)[0] & 0x4000:                 # into a folder
+                    dst = dst.rstrip("/") + "/" + src.rstrip("/").split("/")[-1]
+            except OSError:
+                pass
+            if func in (FO_MOVE, FO_RENAME):
+                os.rename(src, dst)
+            elif func == FO_COPY:
+                with open(src, "rb") as f, open(dst, "wb") as g:
+                    while True:
+                        chunk = f.read(65536)
+                        if not chunk:
+                            break
+                        g.write(chunk)
+    except (OSError, IndexError):
+        return 0x7C                                          # DE_INVALIDFILES
+    return 0
+
+
+# ---- files dropped on a window (WM_DROPFILES) ----
+
+@dll(4)
+def DragQueryFileW(p, drop, index, buf, size):
+    paths = p.handles.get(drop)
+    if not isinstance(paths, list):
+        return 0
+    if index == 0xFFFFFFFF:
+        return len(paths)
+    if index >= len(paths):
+        return 0
+    from pywin.process import to_windows
+    name = to_windows(paths[index])
+    if buf and size:
+        mem.put_wstr(buf, name[:size - 1])
+    return len(name)
+
+
+@dll(2)
+def DragQueryPoint(p, drop, pt):
+    mem.put64(pt, 0)
+    return 1
+
+
+@dll(1)
+def DragFinish(p, drop):
+    p.handles.pop(drop, None)
+
+
+@dll(2)
+def SHGetKnownFolderPath(p, folder_id, flags):
+    return E_FAIL

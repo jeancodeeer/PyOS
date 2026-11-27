@@ -2,6 +2,7 @@
 # STATIC, EDIT) and message boxes. Drawing is in gdi32.py; the shapes of
 # windows and DCs are in pywin/gui.py.
 import time
+import _thread
 from pywin import mem, cformat
 from pywin.dlls import Dll
 from pywin.gui import *          # noqa: F401,F403  (message numbers and classes)
@@ -11,6 +12,9 @@ dll = Dll("user32")
 MSG_SIZE = 48
 
 
+EXTRA_CLASSES = []                 # more built-in controls, added by the other parts of user32
+
+
 class State:
     """Everything user32 keeps for one process."""
 
@@ -18,24 +22,31 @@ class State:
         self.p = p
         self.classes = {}            # lower-case name -> WndClass
         self.windows = {}            # HWND -> Wnd
-        self.queue = []              # posted messages: (hwnd, msg, wparam, lparam)
+        self.queue = []              # posted messages: (hwnd, msg, wparam, lparam, thread)
         self.timers = {}             # (hwnd, id) -> [period ms, next time, callback]
         self.focus = 0
         self.atoms = {}              # RegisterClass number -> class name
         self.menus = {}              # HMENU -> gui.Menu
-        self.quit = None             # exit code once PostQuitMessage was called
+        self.quit = {}               # thread -> exit code, once that thread called PostQuitMessage
         self.next = 0x10010
         for name, proc, render in (("button", _button_proc, _button_render),
                                    ("static", _static_proc, _static_render),
                                    ("edit", _edit_proc, _edit_render)):
             self.classes[name] = gui.WndClass(name, proc, (240, 240, 240), render=render)
+        for cls in EXTRA_CLASSES:
+            self.classes[cls.name.lower()] = cls
 
     def new_handle(self):
         self.next += 2
         return self.next
 
-    def post(self, hwnd, msg, wparam=0, lparam=0):
-        self.queue.append((hwnd, msg, wparam & 0xFFFFFFFFFFFFFFFF, lparam & 0xFFFFFFFFFFFFFFFF))
+    def post(self, hwnd, msg, wparam=0, lparam=0, thread=None):
+        """Like Windows, each thread has its own messages: those for the
+        windows it created. (thread None: whichever thread asks first.)"""
+        w = self.windows.get(hwnd)
+        if w is not None:
+            thread = getattr(w, "thread", None)
+        self.queue.append((hwnd, msg, wparam & 0xFFFFFFFFFFFFFFFF, lparam & 0xFFFFFFFFFFFFFFFF, thread))
 
 
 def state(p):
@@ -81,7 +92,12 @@ def _register(p, name, proc, brush, style, extra):
     b = gdi32.brush_color(p, brush)
     if b is not None:
         color = b
-    s.classes[name.lower()] = gui.WndClass(name, proc, color, style, extra)
+    render = None
+    fn = python_proc(p, proc)
+    if fn is not None:                       # a "superclass" of a built-in control
+        proc = fn
+        render = next((c.render for c in s.classes.values() if c.proc is fn), None)
+    s.classes[name.lower()] = gui.WndClass(name, proc, color, style, extra, render=render)
     atom = 0xC000 + len(s.atoms)
     s.atoms[atom] = name
     return atom
@@ -93,27 +109,38 @@ def _class_name(p, ptr, wide):
     return mem.wstr(ptr) if wide else mem.cstr(ptr)
 
 
+def _register_from(p, wc, wide, ex):
+    """WNDCLASS: style, proc, class extra, window extra, instance, icon, cursor,
+    brush, menu name, class name. WNDCLASSEX starts with its size, so its style
+    is at 4 and its two extras move up by 4; the rest is at the same places."""
+    text = mem.wstr if wide else mem.cstr
+    style, extra = (mem.u32(wc + 4), mem.i32(wc + 20)) if ex else (mem.u32(wc), mem.i32(wc + 16))
+    atom = _register(p, text(mem.u64(wc + 64)), mem.u64(wc + 8), mem.u64(wc + 48), style, extra)
+    menu = mem.u64(wc + 56)                         # a menu every window of the class gets
+    if menu:
+        cls = state(p).classes[state(p).atoms[atom].lower()]
+        cls.menu = (mem.u64(wc + 24), menu if menu < 0x10000 else text(menu), wide)
+    return atom
+
+
 @dll(1)
 def RegisterClassA(p, wc):
-    # WNDCLASS: style, proc, cls extra, wnd extra, instance, icon, cursor, brush, menu, name
-    return _register(p, mem.cstr(mem.u64(wc + 64)), mem.u64(wc + 8), mem.u64(wc + 48), mem.u32(wc), mem.i32(wc + 16))
+    return _register_from(p, wc, False, False)
 
 
 @dll(1)
 def RegisterClassW(p, wc):
-    return _register(p, mem.wstr(mem.u64(wc + 64)), mem.u64(wc + 8), mem.u64(wc + 48), mem.u32(wc), mem.i32(wc + 16))
+    return _register_from(p, wc, True, False)
 
 
 @dll(1)
 def RegisterClassExA(p, wc):
-    # WNDCLASSEX: its size, then the fields of WNDCLASS at the same places
-    # (style at 4), and a small icon after the class name
-    return _register(p, mem.cstr(mem.u64(wc + 64)), mem.u64(wc + 8), mem.u64(wc + 48), mem.u32(wc + 4), mem.i32(wc + 20))
+    return _register_from(p, wc, False, True)
 
 
 @dll(1)
 def RegisterClassExW(p, wc):
-    return _register(p, mem.wstr(mem.u64(wc + 64)), mem.u64(wc + 8), mem.u64(wc + 48), mem.u32(wc + 4), mem.i32(wc + 20))
+    return _register_from(p, wc, True, True)
 
 
 @dll(2)
@@ -132,6 +159,10 @@ CW_USEDEFAULT = -0x80000000
 def _create(p, ex_style, cls_name, title, style, x, y, w, h, parent, menu, inst, param, wide):
     s = state(p)
     cls = s.classes.get(cls_name.lower())
+    if cls is None:                                     # a control from a DLL loaded later?
+        cls = next((c for c in EXTRA_CLASSES if c.name.lower() == cls_name.lower()), None)
+        if cls is not None:
+            s.classes[cls_name.lower()] = cls
     if cls is None:
         p.warn("clase de ventana desconocida: " + cls_name)
         return 0
@@ -151,6 +182,12 @@ def _create(p, ex_style, cls_name, title, style, x, y, w, h, parent, menu, inst,
     wnd.wide = wide
     if not child and menu:
         wnd.menu = _menu(p, menu)                       # a main window's hMenu is its menu bar
+    elif not child and getattr(cls, "menu", None):     # else the class's menu, from the resources
+        inst_, name, wide_ = cls.menu
+        found = p.resource(inst_ or p.base, 4, name.upper() if isinstance(name, str) else name)
+        if found:
+            wnd.menu = _menu(p, _new_menu(p, _parse_menu(mem.read(found[0], found[1]))))
+    wnd.thread = _thread.get_ident()                    # its messages go to this thread
     s.windows[handle] = wnd
     if child:
         parent_w.children.append(wnd)
@@ -216,6 +253,8 @@ def ShowWindow(p, hwnd, how):
             p.ui.open_window(w)
         elif not w.visible and w.host is not None:
             p.ui.close_window(w)
+        if not w.visible:
+            w.forget_pixels()                       # a hidden window needs no picture
     w.invalid = True
     _changed(w)
     return 1 if was else 0
@@ -387,6 +426,27 @@ def MoveWindow(p, hwnd, x, y, w, h, repaint):
     return 1
 
 
+HWND_TOP, HWND_BOTTOM, HWND_TOPMOST, HWND_NOTOPMOST = 0, 1, 0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFE
+
+
+def _restack(p, wnd, after):
+    """Move a child in its parent's list (top first): HWND_TOP, HWND_BOTTOM,
+    or just below the window `after`."""
+    siblings = wnd.parent.children if wnd.parent is not None and wnd in wnd.parent.children else None
+    if siblings is None:
+        return
+    siblings.remove(wnd)
+    if after in (HWND_TOP, HWND_TOPMOST, HWND_NOTOPMOST):
+        siblings.insert(0, wnd)
+    elif after == HWND_BOTTOM:
+        siblings.append(wnd)
+    else:
+        other = _wnd(p, after)
+        i = siblings.index(other) + 1 if other in siblings else 0
+        siblings.insert(i, wnd)
+    _changed(wnd)
+
+
 @dll(7)
 def SetWindowPos(p, hwnd, after, x, y, w, h, flags):
     wnd = _wnd(p, hwnd)
@@ -397,6 +457,8 @@ def SetWindowPos(p, hwnd, after, x, y, w, h, flags):
     if flags & 2:                                       # SWP_NOMOVE
         x, y = wnd.x, wnd.y
     _move(p, wnd, _i32(x), _i32(y), _i32(w), _i32(h))
+    if not flags & 0x4:                                 # SWP_NOZORDER not given: restack it
+        _restack(p, wnd, after)
     if flags & 0x40:
         ShowWindow(p, hwnd, 5)
     if flags & 0x80:
@@ -523,6 +585,25 @@ def SetDlgItemInt(p, hwnd, item, value, signed):
 GWL_WNDPROC, GWL_USERDATA, GWL_STYLE, GWL_ID = -4, -21, -16, -12
 
 
+def proc_address(p, fn):
+    """An address the program can call for a window procedure written in
+    Python (a built-in control). Programs read it with GetWindowLongPtr to
+    "subclass" a control and later pass it to CallWindowProc."""
+    thunks = p.state.setdefault("proc_thunks", {})        # Python function -> address
+    if fn not in thunks:
+        def from_program(p, hwnd, msg, wparam, lparam):
+            return fn(p, _wnd(p, hwnd), msg, wparam, lparam) if _wnd(p, hwnd) else 0
+        addr = p._thunk(from_program, 4, "user32!<proc de control>")[1]
+        thunks[fn] = addr
+        p.state.setdefault("thunk_procs", {})[addr] = fn
+    return thunks[fn]
+
+
+def python_proc(p, addr):
+    """The Python window procedure behind an address from proc_address (or None)."""
+    return p.state.get("thunk_procs", {}).get(addr)
+
+
 @dll(2)
 def GetWindowLongPtrA(p, hwnd, index):
     w = _wnd(p, hwnd)
@@ -532,7 +613,7 @@ def GetWindowLongPtrA(p, hwnd, index):
     if i == GWL_USERDATA:
         return w.user_data
     if i == GWL_WNDPROC:
-        return w.proc if not callable(w.proc) else 0
+        return proc_address(p, w.proc) if callable(w.proc) else w.proc
     if i == GWL_STYLE:
         return w.style
     if i == GWL_ID:
@@ -550,7 +631,7 @@ def SetWindowLongPtrA(p, hwnd, index, value):
     if i == GWL_USERDATA:
         w.user_data = value
     elif i == GWL_WNDPROC:
-        w.proc = value
+        w.proc = python_proc(p, value) or value
     elif i == GWL_STYLE:
         w.style = value
     else:
@@ -598,18 +679,19 @@ def _next_message(p, hwnd, remove=True):
     if p.killed:
         from pywin.process import Exit
         raise Exit(1)
+    me = _thread.get_ident()
     for i, m in enumerate(s.queue):
-        if not hwnd or m[0] == hwnd:
+        if (m[4] is None or m[4] == me) and (not hwnd or m[0] == hwnd):
             if remove:
                 del s.queue[i]
-            return m
-    if s.quit is not None:
+            return m[:4]
+    if me in s.quit:
         if remove:
-            code, s.quit = s.quit, None
+            code = s.quit.pop(me)
             s.quit_sent = True
             return (0, WM_QUIT, code, 0)
-        return (0, WM_QUIT, s.quit, 0)
-    w = _invalid(s.windows.values())
+        return (0, WM_QUIT, s.quit[me], 0)
+    w = _invalid(x for x in s.windows.values() if getattr(x, "thread", None) in (None, me))
     if w is not None:
         if remove:
             w.invalid = False
@@ -617,6 +699,8 @@ def _next_message(p, hwnd, remove=True):
         return (w.handle, WM_PAINT, 0, 0)
     now = time.ticks_ms()
     for key, t in s.timers.items():
+        if t[3] not in (None, me):                      # another thread's timer
+            continue
         if time.ticks_diff(now, t[1]) >= 0:
             if remove:
                 t[1] = time.ticks_add(now, t[0])
@@ -734,7 +818,7 @@ def PostThreadMessageA(p, tid, msg, wparam, lparam):
 
 @dll(1)
 def PostQuitMessage(p, code):
-    state(p).quit = _i32(code)
+    state(p).quit[_thread.get_ident()] = _i32(code)
 
 
 @dll(4)
@@ -772,6 +856,10 @@ dll.alias("DefWindowProcW", "DefWindowProcA")
 def CallWindowProcA(p, proc, hwnd, msg, wparam, lparam):
     if not proc:
         return 0
+    fn = python_proc(p, proc)
+    if fn is not None:                                   # a built-in control: straight to Python
+        w = _wnd(p, hwnd)
+        return fn(p, w, msg, wparam, lparam) if w else 0
     return p.call(proc, hwnd, msg, wparam, lparam)
 
 
@@ -789,7 +877,7 @@ def InvalidateRect(p, hwnd, rect, erase):
     return 1
 
 
-@dll(3)
+@dll(4)
 def RedrawWindow(p, hwnd, rect, region, flags):
     InvalidateRect(p, hwnd, rect, 1)
     w = _wnd(p, hwnd)
@@ -821,7 +909,8 @@ def SetTimer(p, hwnd, n, ms, callback):
     s = state(p)
     if not n and not hwnd:
         n = 0x7000 + len(s.timers)
-    s.timers[(hwnd, n)] = [max(10, ms), time.ticks_add(time.ticks_ms(), max(10, ms)), callback]
+    owner = getattr(s.windows.get(hwnd), "thread", None) if hwnd else _thread.get_ident()
+    s.timers[(hwnd, n)] = [max(10, ms), time.ticks_add(time.ticks_ms(), max(10, ms)), callback, owner]
     return n or 1
 
 
@@ -893,7 +982,7 @@ def GetSysColorBrush(p, n):
     return gdi32.new_object(p, gui.Brush(gui.SYS_COLORS.get(n, (240, 240, 240))))
 
 
-@dll(2)
+@dll(3)
 def CheckDlgButton(p, hwnd, item, on):
     w = _wnd(p, GetDlgItem(p, hwnd, item))
     if w:
@@ -1403,3 +1492,5 @@ from pywin.dlls import gdi32 as _gdi    # noqa: E402
 for _n in ("BeginPaint", "EndPaint", "GetDC", "GetWindowDC", "ReleaseDC", "FillRect", "FrameRect",
            "DrawTextA", "DrawTextW"):
     dll.functions[_n] = _gdi.dll.functions[_n]
+
+from pywin.dlls import u32_extra, u32_dialogs, u32_images    # noqa: E402,F401  (the rest of user32)

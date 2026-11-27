@@ -1,4 +1,4 @@
-# The guided tour: PyOS shows itself. A robot (pyos/robot.py) opens every
+# The guided tour: SnakeyOS shows itself. A robot (pyos/robot.py) opens every
 # app on the desktop and uses it with the mouse and the keyboard, while
 # subtitles say what is happening. Type  tour()  at the PyKernel prompt.
 #
@@ -34,7 +34,7 @@ def _open(r, name, title, label=None, dock=False):
 
 # ---- the desktop ----
 
-@step("Bienvenido a PyOS: un sistema operativo escrito en Python, sobre PyKernel")
+@step("Bienvenido a SnakeyOS: un sistema operativo escrito en Python, sobre PyKernel")
 def welcome(r):
     r.move(512, 380, 600)
     r.wait(2500)
@@ -115,7 +115,7 @@ def terminal(r):
 def editor(r):
     w = _open(r, "editor", "Editor", dock=True)
     r.wait(1000)
-    r.type("def saludo(nombre):\n    return 'Hola ' + nombre\n\nprint(saludo('PyOS'))\n", 45)
+    r.type("def saludo(nombre):\n    return 'Hola ' + nombre\n\nprint(saludo('SnakeyOS'))\n", 45)
     r.wait(1500)
     r.close(w)
     if _wm().dialog:
@@ -225,7 +225,7 @@ def games(r):
 def bloc(r):
     w = _open(r, "bloc", "Bloc de notas")
     r.wait(800)
-    r.type("Notas de la demo de PyOS.\nTodo esta escrito en Python.\n", 45)
+    r.type("Notas de la demo de SnakeyOS.\nTodo esta escrito en Python.\n", 45)
     r.wait(1200)
     r.close(w)
     if _wm().dialog:
@@ -250,7 +250,7 @@ def escritor(r):
     w = _open(r, "escritor", "Escritor")
     r.wait(900)
     r.click_in(w, 300, 90)                       # into the document
-    r.type(" de PyOS", 60)
+    r.type(" de SnakeyOS", 60)
     r.press("enter")
     r.type("Escrito con el teclado, en Python.", 50)
     r.wait(1500)
@@ -301,7 +301,7 @@ def notes_tasks(r):
     w = _open(r, "tareas", "Tareas")
     r.wait(800)
     r.click_in(w, 170, 29)
-    r.type("Grabar el video de PyOS\n", 50)
+    r.type("Grabar el video de SnakeyOS\n", 50)
     r.wait(1500)
     r.close(w)
 
@@ -501,7 +501,7 @@ def doom(r):
         r.close(r.window("doom.exe", 500))
 
 
-@step("Acerca de PyOS")
+@step("Acerca de SnakeyOS")
 def about(r):
     pw = r.window("PyWin", 500)
     if pw:

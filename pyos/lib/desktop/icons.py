@@ -7,6 +7,7 @@ from pygame.constants import SRCALPHA
 _cache = {}
 
 COLORS = {
+    "updates": ((60, 140, 240), (20, 90, 200)),
     "terminal": ((40, 44, 52), (90, 96, 110)), "files": ((66, 140, 255), (40, 100, 220)),
     "browser": ((40, 170, 255), (20, 110, 210)), "editor": ((255, 170, 50), (230, 120, 30)),
     "sysmon": ((80, 200, 120), (40, 150, 90)), "settings": ((140, 146, 160), (90, 96, 110)),
@@ -15,7 +16,7 @@ COLORS = {
     "store": ((60, 200, 200), (30, 150, 160)), "disks": ((100, 110, 130), (60, 66, 80)),
     "snake": ((80, 200, 80), (40, 140, 50)), "blocks": ((170, 90, 230), (120, 60, 190)),
     "mines": ((130, 140, 160), (80, 90, 110)), "about": ((64, 120, 242), (40, 80, 200)),
-    "music": ((255, 80, 110), (200, 40, 80)), "jeancode": ((20, 20, 20), (60, 60, 60)),
+    "music": ((255, 80, 110), (200, 40, 80)), "videos": ((70, 70, 90), (24, 24, 34)), "jeancode": ((20, 20, 20), (60, 60, 60)),
     "folder": ((120, 170, 255), (70, 120, 230)), "notes": ((250, 210, 70), (230, 170, 40)),
     "sheet": ((70, 190, 110), (40, 140, 80)), "trash": ((140, 146, 160), (100, 106, 120)),
     "bloc": ((120, 180, 255), (70, 130, 230)), "escritor": ((60, 110, 230), (30, 70, 190)),
@@ -81,6 +82,19 @@ def icon(name, size=48, label=None):
         pts = [P(9, 32), P(16, 26), P(22, 30), P(29, 17), P(35, 22), P(40, 12)]
         d.lines(s, W, False, pts, max(2, int(3 * u)))
         d.rect(s, (255, 255, 255, 120), R(9, 36, 30, 2))
+    elif name == "updates":                     # two arrows going round: "update"
+        c = P(24, 24)
+        rr = int(12 * u)
+        wdt = max(2, int(4 * u))
+        for start in (0.3, 3.45):
+            pts = [(c[0] + int(math.cos(start + t / 10.0 * 2.5) * rr), c[1] + int(math.sin(start + t / 10.0 * 2.5) * rr))
+                   for t in range(11)]
+            d.lines(s, W, False, pts, wdt)
+            ex, ey = pts[-1]
+            a = start + 2.5 + math.pi / 2
+            d.polygon(s, W, [(ex + int(math.cos(a) * 6 * u), ey + int(math.sin(a) * 6 * u)),
+                             (ex - int(math.cos(a - 1.2) * 7 * u), ey - int(math.sin(a - 1.2) * 7 * u)),
+                             (ex - int(math.cos(a + 1.2) * 1 * u), ey - int(math.sin(a + 1.2) * 1 * u))])
     elif name == "settings":
         c = P(24, 24)
         for k in range(8):
@@ -139,6 +153,12 @@ def icon(name, size=48, label=None):
         d.rect(s, W, R(30, 12, 3, 16))
         d.circle(s, W, P(18, 33), int(4 * u))
         d.circle(s, W, P(28, 29), int(4 * u))
+    elif name == "videos":                       # a film frame with a play triangle
+        d.rect(s, W, R(9, 13, 30, 22), max(1, int(2 * u)), max(1, int(3 * u)))
+        for k in range(4):
+            d.rect(s, W, R(11 + 7 * k, 15, 3, 2))
+            d.rect(s, W, R(11 + 7 * k, 31, 3, 2))
+        d.polygon(s, (255, 80, 80), [P(20, 18), P(20, 30), P(30, 24)])
     elif name == "about":                        # an "i"
         d.circle(s, W, P(24, 15), int(3 * u))
         d.rect(s, W, R(21, 21, 6, 15))

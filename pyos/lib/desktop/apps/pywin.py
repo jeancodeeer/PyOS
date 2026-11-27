@@ -26,16 +26,14 @@ def find_programs():
 def check(path):
     """What an .exe is and which of its Windows functions PyWin lacks."""
     from pywin import pe, dlls
-    with open(path, "rb") as f:
-        img = pe.Image(f.read())
+    img = pe.Image(pe.read_file(path))
     imports = img.file_imports()
     folder = path.rsplit("/", 1)[0]
     own = {}                                        # DLL files that come with the program
     try:
         for entry in os.listdir(folder):
             if entry.lower().endswith(".dll"):
-                with open(folder + "/" + entry, "rb") as f:
-                    own[entry.lower()] = pe.Image(f.read()).file_exports()
+                own[entry.lower()] = pe.Image(pe.read_file(folder + "/" + entry)).file_exports()
     except OSError:
         pass
     missing = [dll + "!" + name for dll, name, _ in imports
@@ -94,7 +92,7 @@ class PyWin(App):
         surf.fill(T.WIN_BG)
         surf.blit(icons.icon("pywin", 40), (12, 12))
         ui.text(surf, "PyWin", 62, 12, T.TEXT, ui.font(18, bold=True))
-        ui.text(surf, "Programas de Windows (x64) en PyOS: su codigo corre en el procesador; Windows es Python.",
+        ui.text(surf, "Programas de Windows (x64) en SnakeyOS: su codigo corre en el procesador; Windows es Python.",
                 62, 36, T.MUTED, ui.font(11), self.win.w - 80)
         self.form.draw(surf)
         x = LIST_W + 32

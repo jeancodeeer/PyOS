@@ -1,4 +1,4 @@
-# PyOS apps: the built-in ones (modules in this folder) and app files.
+# SnakeyOS apps: the built-in ones (modules in this folder) and app files.
 #
 # An app file is one .py file that starts with a header:
 #
@@ -19,6 +19,7 @@ BUILTIN = {
     "browser": ("desktop.apps.browser", "Browser", "Navegador"),
     "editor": ("desktop.apps.editor", "Editor", "Editor"),
     "music": ("desktop.apps.music", "Music", "Musica"),
+    "videos": ("desktop.apps.videos", "Videos", "Videos"),
     "images": ("desktop.apps.images", "Images", "Imagenes"),
     "paint": ("desktop.apps.paint", "Paint", "Dibujo"),
     "calc": ("desktop.apps.calc", "Calculator", "Calculadora"),
@@ -27,17 +28,18 @@ BUILTIN = {
     "settings": ("desktop.apps.settings", "Settings", "Ajustes"),
     "disks": ("desktop.apps.disks", "Disks", "Discos"),
     "store": ("desktop.apps.store", "Store", "Tienda"),
-    "jeancode": ("desktop.apps.about", "JeanCodeLauncher", "JeanCode"),
+    "updates": ("desktop.apps.updates", "Updates", "Actualizaciones"),
+    "jeancode": ("desktop.apps.jeancode", "JeanCode", "JeanCode"),
     "snake": ("desktop.apps.games", "Snake", "Serpiente"),
     "blocks": ("desktop.apps.games", "Blocks", "Bloques"),
     "mines": ("desktop.apps.games", "Mines", "Buscaminas"),
     "pywin": ("desktop.apps.pywin", "PyWin", "PyWin"),
-    "about": ("desktop.apps.about", "About", "Acerca de PyOS"),
+    "about": ("desktop.apps.about", "About", "Acerca de SnakeyOS"),
 }
 # a dict has no order in MicroPython: these lists give it
-ORDER = ["browser", "files", "terminal", "editor", "music", "images", "paint", "calc", "clock",
-         "sysmon", "settings", "disks", "store", "pywin", "jeancode", "snake", "blocks", "mines", "about"]
-DOCK = ["files", "browser", "terminal", "editor", "music", "settings", "store"]
+ORDER = ["browser", "files", "terminal", "editor", "music", "videos", "images", "paint", "calc", "clock",
+         "sysmon", "settings", "updates", "disks", "store", "pywin", "jeancode", "snake", "blocks", "mines", "about"]
+DOCK = ["files", "browser", "terminal", "editor", "music", "videos", "settings", "store"]
 FOLDERS = ("/apps", "/disk/apps")
 
 _files = None           # name -> header dict, for app files
@@ -139,7 +141,7 @@ def install(source):
     text = data.decode("utf-8")
     if not text.startswith("# pyos-app"):
         if "import pygame" not in text:
-            raise ValueError("not a PyOS app (no '# pyos-app' header) nor a pygame program")
+            raise ValueError("not a SnakeyOS app (no '# pyos-app' header) nor a pygame program")
         base = source.rstrip("/").rsplit("/", 1)[-1][:-3] if source.endswith(".py") else "app"
         text = "# pyos-app\n# name: %s\n# mode: fullscreen\n" % base + text     # a plain pygame game
     name = source.rstrip("/").rsplit("/", 1)[-1]

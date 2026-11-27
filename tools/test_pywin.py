@@ -1,4 +1,4 @@
-"""PyWin and OpenGL checks: boot PyKernel + PyOS in QEMU, run the example
+"""PyWin and OpenGL checks: boot PyKernel + SnakeyOS in QEMU, run the example
 Windows programs and draw with OpenGL into a Surface.
 
     python tools/test_pywin.py
@@ -76,7 +76,25 @@ wm.SCRIPT = [(800, lambda: start('notas.exe')), (3000, type_and_menu), (4500, sa
 """
 
 
+def dll_argument_counts():
+    """Every Windows function written in Python says how many arguments it
+    takes (@dll(n)); a wrong n crashes the program that calls it."""
+    import ast
+    wrong = []
+    for path in sorted((ROOT / "pyos" / "lib" / "pywin" / "dlls").glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.FunctionDef):
+                for d in node.decorator_list:
+                    if (isinstance(d, ast.Call) and isinstance(d.func, ast.Name) and d.func.id.startswith("dll")
+                            and d.args and isinstance(d.args[0], ast.Constant) and node.args.vararg is None
+                            and len(node.args.args) - 1 != d.args[0].value):
+                        wrong.append("%s:%s" % (path.name, node.name))
+    return wrong
+
+
 def main():
+    wrong = dll_argument_counts()
+    check("DLL functions take the number of arguments they declare", not wrong, wrong)
     subprocess.run([sys.executable, str(ROOT / "tools" / "build.py"), "--fs"], check=True, capture_output=True)
     m = T.Machine(make_disk(ROOT / "build" / "test-disk.img"))
     try:

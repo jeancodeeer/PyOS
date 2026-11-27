@@ -178,8 +178,8 @@ class SocketFile:
     def __init__(self, sock):
         self.sock, self.buf = sock, bytearray()
 
-    def _fill(self):
-        chunk = self.sock.recv(4096)
+    def _fill(self, want=65536):
+        chunk = self.sock.recv(max(4096, min(want, 262144)))
         self.buf += chunk
         return bool(chunk)
 
@@ -197,8 +197,11 @@ class SocketFile:
             while self._fill():
                 pass
             n = len(self.buf)
-        while len(self.buf) < n and self._fill():
+        while len(self.buf) < n and self._fill(n - len(self.buf)):
             pass
+        if n >= len(self.buf):                   # all of it: no copy of the rest
+            out, self.buf = bytes(self.buf), bytearray()
+            return out
         out = bytes(self.buf[:n])
         self.buf = self.buf[n:]
         return out
